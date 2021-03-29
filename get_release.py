@@ -39,7 +39,7 @@ RETURNCODE_OK = 0
 RETURNCODE_ERROR = 1
 
 PRX_MBID = re.compile(
-    '.+? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
+    r'.+? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
     re.X)
 
 
@@ -56,7 +56,7 @@ PRX_MBID = re.compile(
 
 
 def mbid(source_text):
-    """Return a musicbraniz ID from a string"""
+    """Return a musicbrainz ID from a string"""
     try:
         return PRX_MBID.match(source_text).group(1)
     except AttributeError as error:
@@ -74,7 +74,7 @@ def time_display(milliseconds):
 def __get_arguments():
     """Parse command line arguments"""
     argument_parser = argparse.ArgumentParser(
-        description='Get data from a musicbrainz release')
+        description='Get and print data from a musicbrainz release')
     argument_parser.set_defaults(loglevel=dialog.logging.INFO)
     argument_parser.add_argument(
         '-v', '--verbose',
@@ -110,26 +110,29 @@ def main(arguments):
         includes=['media', 'artists', 'recordings', 'artist-credits'])
     #
     release_data = response_data['release']
-    LOGGER.heading(
-        'Release %r by %s',
-        release_data['title'],
-        release_data['artist-credit-phrase'])
-    LOGGER.info('Date: %s', release_data['date'])
-    LOGGER.info('Medium count: %s', release_data['medium-count'])
+    LOGGER.separator(style=LOGGER.box_formatter.double)
+    print(
+        '%s – %s' % (
+            release_data['artist-credit-phrase'],
+            release_data['title']))
+    print(' * Date: %s' % release_data['date'])
+    print(' * Medium count: %s' % release_data['medium-count'])
     for medium_data in release_data['medium-list']:
-        LOGGER.heading(
-            'Medium #%s (%s)',
-            medium_data['position'],
-            medium_data['format'])
+        print(
+            'Medium #%s (%s)' % (
+                medium_data['position'],
+                medium_data['format']))
+        track_count = medium_data['track-count']
         for track_data in medium_data['track-list']:
             # LOGGER.debug(repr(list(track_data)))
-            LOGGER.info(
-                '%2s / %s. %s – %s (%s)',
-                track_data['position'],
-                track_data['number'],
-                track_data['artist-credit-phrase'],
-                track_data['recording']['title'],
-                time_display(int(track_data['length'])))
+            print(
+                '%2s/%02d | %s. %s – %s (%s)' % (
+                    track_data['position'],
+                    track_count,
+                    track_data['number'],
+                    track_data['artist-credit-phrase'],
+                    track_data['recording']['title'],
+                    time_display(int(track_data['length']))))
         #
     #
     return RETURNCODE_OK
