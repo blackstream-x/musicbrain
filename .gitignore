@@ -18,6 +18,6 @@ venv/
 .spyproject
 build.txt
 
-# local pyscrypt copy
-pyscrypt/
+# local test data
+testdata/
 

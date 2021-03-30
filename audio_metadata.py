@@ -26,19 +26,33 @@ import taglib
 #
 
 
-# Track number prefixes as given by sound juicer: d1t01, d1t02, etc.
-RX_track = re.compile(
-    r'\A d (?P<discno> \d) t (?P<trackno> \d+)',
-    re.X
-)
+PRX_INVALID_FILENAME = re.compile(r'["\*/:;<>\?\\\|]')
 PRX_KEYWORD = re.compile(r'\A[a-z]+\Z', re.I)
 
-INVALID_FILENAME_CHARACTERS = r'\:;*?"<>|'
-REPLACE_AT_END_OF_FILE_NAME = '.'
-REPLACEMENT_CHARACTER = '_'
+SAFE_REPLACEMENT = '_'
+
 
 #
-# Helper classes
+# Exceptions
+#
+
+
+class ConversionNotRequired(Exception):
+
+    """Raised when the tags seem to be already correctly encoded"""
+
+    ...
+
+
+class NoSupportedFile(Exception):
+
+    """Raised when trying to open an unsupported file using taglib"""
+
+    ...
+
+
+#
+# Helper functions
 #
 
 
@@ -46,10 +60,13 @@ def fix_utf8(source_text):
     """Try to recode Unicode erroneously encoded as latin-1
     to UTF-8
     """
+    if source_text.isascii():
+        raise ConversionNotRequired
+    #
     try:
         utf8_text = source_text.encode('latin-1').decode('utf-8')
-    except UnicodeDecodeError:
-        return source_text
+    except UnicodeError as error:
+        raise ConversionNotRequired from error
     #
     logging.info('Fixed %r -> %r', source_text, utf8_text)
     return utf8_text
@@ -64,21 +81,30 @@ class Track:
 
     """Object exposing an audio track's metadata"""
 
+    fs_display = (
+        '{0.display_prefix}{0.TITLE} – {0.ARTIST}'
+        ' ({0.display_duration})')
+    fs_file_stub = '{0.file_prefix}{0.ARTIST} - {0.TITLE}'
+    fs_sided_prefix = 'd{0.medium_number}{0.sided_number}. '
+    fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
     prx_special_number = re.compile(r'\Ad\d+([^t\d].+)\.\s')
     prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
     supported_tags = {
-        'album', 'albumartist', 'artist', 'date',
-        'discnumber', 'title', 'tracknumber'}
-    numeric_tags = {'discnumber'}
+        'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
+        'DISCNUMBER', 'TITLE', 'TRACKNUMBER'}
+    ignored_tags = {
+        'COMMENT', 'DISCID'}
 
-    def __init__(self, file_path, length=0, **tags_map):
+    def __init__(self, file_path, length=0, tags_changed=False, **tags_map):
         """Store the file path and the metadata"""
         self.file_path = file_path
         self.length = length
+        self.medium_number = None
         self.track_number = None
         self.total_tracks = None
         self.__tags = {}
-        self.update_tags(**tags_map)
+        self.__set_tags(**tags_map)
+        self.__tags_changed = tags_changed
         special_numbering = self.prx_special_number.match(file_path.name)
         if special_numbering:
             self.sided_number = special_numbering.group(1)
@@ -89,42 +115,121 @@ class Track:
     @classmethod
     def from_path(cls, file_path):
         """Read metatada from the file and return a Track instance"""
-        file_metadata = taglib.File(file_path)
+        try:
+            file_metadata = taglib.File(str(file_path))
+        except OSError as error:
+            raise NoSupportedFile from error
+        #
         length = file_metadata.length
         tags_map = {}
+        tags_changed = False
         for (key, values) in file_metadata.tags.items():
             if values and PRX_KEYWORD.match(key):
-                tags_map[key.lower()] = values[0]
+                current_value = values[0]
+                try:
+                    current_value = fix_utf8(current_value)
+                except ConversionNotRequired:
+                    pass
+                else:
+                    tags_changed = True
+                #
+                tags_map[key] = current_value
             #
         #
-        return cls(file_path, length=length, **tags_map)
+        return cls(file_path,
+                   length=length,
+                   tags_changed=tags_changed,
+                   **tags_map)
+
+    @property
+    def display_duration(self):
+        """Return the pretty-printed ltrack length"""
+        return '%02d:%02d' % divmod(self.length, 60)
+
+    @property
+    def display_prefix(self):
+        """Return the prefix for display purposes"""
+        if self.sided_number:
+            return '%s. ' % self.sided_number
+        #
+        if self.track_number:
+            return '%02d. ' % self.track_number
+        #
+        return ''
+
+    @property
+    def file_prefix(self):
+        """Return the prefix for file names"""
+        if self.sided_number:
+            return self.fs_sided_prefix.format(self)
+        #
+        if self.track_number:
+            return self.fs_unsided_prefix.format(self)
+        #
+        return ''
+
+    def save_tags(self, force_write=False):
+        """Save the tags to the file"""
+        if self.__tags_changed or force_write:
+            file_metadata = taglib.File(str(self.file_path))
+            for tag_name in self.supported_tags:
+                file_metadata.tags[tag_name] = [self[tag_name]]
+            #
+            file_metadata.save()
+            logging.info('Saved tags to %s', self.file_path)
+        else:
+            raise ConversionNotRequired
+        #
+        self.__tags_changed = False
+
+    def suggested_filename(self, fmt=None):
+        """Return a file name suggested from the tags,
+        defused using the PRX_INVALID_FILENAME regular expression
+        """
+        if fmt is None:
+            fmt = self.fs_file_stub
+        #
+        stem = PRX_INVALID_FILENAME.sub(
+            SAFE_REPLACEMENT,
+            fmt.format(self))
+        # Replace a trailing dot as well
+        if stem.endswith('.'):
+            stem = stem[:-1] + SAFE_REPLACEMENT
+        #
+        return stem + self.file_path.suffix
 
     def update_tags(self, **tags_map):
-        """Update the provided tags given as strings"""
+        """Update the provided tags given as strings
+        and set the __tags_changed flag
+        """
+        self.__set_tags(**tags_map)
+        self.__tags_changed = True
+
+    def __set_tags(self, **tags_map):
+        """Set the provided tags given as strings"""
         for tag_name in self.supported_tags:
             try:
                 self.__tags[tag_name] = tags_map.pop(tag_name)
             except KeyError:
-                pass
-            #
-            if tag_name in self.numeric_tags:
-                self.__tags[tag_name] = int(self.__tags[tag_name], 10)
+                continue
             #
         #
         if tags_map:
-            logging.warning(
-                'Ignored unsupported tag(s): %s.',
-                ', '.join('%s=%r' % (key, value)
-                          for (key, value) in tags_map))
+            unsupported_tags = ', '.join('%s=%r' % (key, value)
+                for (key, value) in tags_map.items()
+                if key not in self.ignored_tags)
+            if unsupported_tags:
+                logging.warning(
+                    'Ignored unsupported tag(s): %s.',
+                    unsupported_tags)
         #
-        if not self.__tags.get('discnumber'):
-            self.__tags['discnumber'] = 1
-        #
+        self.medium_number = int(self.__tags.get('DISCNUMBER', '1'), 10)
         try:
             track_match = self.prx_track_and_total.match(
-                self.__tags['tracknumber'])
+                self.__tags['TRACKNUMBER'])
         except (KeyError, TypeError):
-            self.__tags['tracknumber'] = None
+            self.track_number = None
+            self.total_tracks = None
         else:
             self.track_number = int(track_match.group(1), 10)
             total_tracks = track_match.group(2)
@@ -138,13 +243,18 @@ class Track:
         return str(self) == str(other)
 
     def __getattr__(self, name):
-        """Return the content of the NAME tag"""
+        """Return the tag value via attribute access"""
         try:
-            return self.__tags[name]
+            return self[name]
         except KeyError as error:
-            raise AttributeError('%r object has no attribute %r' % (
-                self.__class__.__name__, name)) from error
+            raise AttributeError(
+                '%r object has no attribute %r' % (
+                    self.__class__.__name__, name)) from error
         #
+
+    def __getitem__(self, name):
+        """Return the tag value (dict-style access)"""
+        return self.__tags[name]
 
     def __hash__(self):
         """Return a hash over the string representation"""
@@ -156,16 +266,14 @@ class Track:
 
     def __str__(self):
         """Return a string representation"""
-        if self.sided_number:
-            prefix = 'd{0.discnumber}{0.sided_number}. '
-        elif self.track_number is None:
+        if self.track_number is None:
             prefix = ''
         else:
-            prefix = 'd{0.discnumber}t{0.track_number:02d}. '
+            prefix = self.fs_unsided_prefix.format(self)
         #
         return (
-            '{0}{1.artist} – {1.title}'
-            ' (from {1.albumartist} – {1.album} [{1.date}])'.format(
+            '{0}{1.ARTIST} – {1.TITLE}'
+            ' (from {1.ALBUMARTIST} – {1.ALBUM} [{1.DATE}])'.format(
                 prefix, self))
 
 
@@ -176,32 +284,101 @@ class Medium:
     def __init__(self,
                  album=None,
                  albumartist=None,
-                 discnumber=None,
+                 medium_number=None,
                  total_tracks=None):
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
-        self.discnumber = discnumber
-        self.total_tracks = total_tracks
-        self.tracklist = []
+        self.medium_number = medium_number
+        self.__declared_total_tracks = total_tracks
+        self.all_tracks = set()
 
     @classmethod
     def from_track(cls, track):
         """Return a new medium from the track metadata"""
         new_medium = cls(
-            album=track.album,
-            albumartist=track.albumartist,
-            discnumber=track.discnumber,
+            album=track.ALBUM,
+            albumartist=track.ALBUMARTIST,
+            medium_number=track.medium_number,
             total_tracks=track.total_tracks)
         new_medium.add_track(track)
         return new_medium
 
+    @property
+    def total_tracks(self):
+        """Return the number of tracks (either declared or counted)"""
+        return self.__declared_total_tracks or len(self.all_tracks)
+
+    @property
+    def tracks_list(self):
+        """Return the tracks as a sorted list"""
+        return sorted(self.all_tracks)
+
     def add_track(self, track):
         """Add the track to the tracklist"""
-        if track in self.tracklist:
-            raise ValueError('Track %s already in tracklist!' % track)
+        if track in self.all_tracks:
+            raise ValueError('Track %r already in tracklist!' % str(track))
         #
-        self.tracklist.append(track)
+        self.all_tracks.add(track)
+
+    def find_errors(self):
+        """Yield a message for everything
+        that does not seem to be correct
+        """
+        tracklist = self.tracks_list
+        missing_tracks = self.total_tracks - len(tracklist)
+        surplus_tracks = 0 - missing_tracks
+        if missing_tracks > 0:
+            surplus_tracks = 0
+            yield '%s tracks missing!' % missing_tracks
+        elif surplus_tracks > 0:
+            missing_tracks = 0
+            yield '%s surplus tracks!' % surplus_tracks
+        #
+        seen_track_numbers = set()
+        duplicate_track_numbers = set()
+        expected_track_numbers = range(1, self.total_tracks + 1)
+        continue_at = None
+        for (index, expected_track_no) in enumerate(expected_track_numbers):
+            if continue_at:
+                if continue_at > expected_track_no:
+                    continue
+                #
+                continue_at = None
+            #
+            try:
+                current_track = tracklist[index]
+            except IndexError:
+                break
+            #
+            found_track_no = current_track.track_number
+            if found_track_no == expected_track_no:
+                continue
+            #
+            if found_track_no in seen_track_numbers:
+                yield '%r -> duplicate track number #%s!' % (
+                    str(current_track), found_track_no)
+                duplicate_track_numbers.add(found_track_no)
+            else:
+                yield '%r -> track number #%s does not match expected #%s!' % (
+                    str(current_track), found_track_no, expected_track_no)
+                if found_track_no > expected_track_no:
+                    # Catch up when tracks are missing
+                    continue_at = found_track_no + 1
+                #
+            #
+            seen_track_numbers.add(found_track_no)
+        #
+        missing_track_numbers = \
+            set(expected_track_numbers) - seen_track_numbers
+        if missing_track_numbers:
+            yield 'Missing track numbers: %s' % ', '.join(
+                missing_track_numbers)
+        #
+        if duplicate_track_numbers:
+            yield 'Duplicated track numbers: %s' % ', '.join(
+                duplicate_track_numbers)
+        #
 
     def __eq__(self, other):
         """Rich comparison: equals"""
@@ -211,11 +388,16 @@ class Medium:
         """Return a hash over the string representation"""
         return hash(str(self))
 
+    def __lt__(self, other):
+        """Rich comparison: less than"""
+        return str(self) < str(other)
+
     def __str__(self):
         """Return a string representation"""
         return (
-            '{0.albumartist} – {0.album} | Medium #{0.discnumber}'
-            ' with {0.total_tracks} tracks'.format(self))
+            'Medium #{0.medium_number}: {0.albumartist} – {0.album}'
+            ' ({0.total_tracks} tracks)'.format(self))
+
 
 class Release:
 
@@ -227,7 +409,7 @@ class Release:
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
-        self.mediumlist = []
+        self.media_map = {}
 
     @classmethod
     def from_medium(cls, medium):
@@ -238,18 +420,39 @@ class Release:
         new_release.add_medium(medium)
         return new_release
 
+    @property
+    def medium_numbers(self):
+        """Return a sorted list of medium numbers"""
+        return [medium.medium_number for medium in self.media_list]
+
+    @property
+    def media_list(self):
+        """Return a sorted list of media"""
+        return sorted(self.media_map)
+
     def add_medium(self, medium):
         """Add the medium to the mediumlist"""
-        if medium in self.mediumlist:
-            raise ValueError('Medium %s already attached!' % medium)
-        #
         if medium.album != self.album:
             logging.warning(
                 'Medium #%s has a differing title: %r!',
-                medium.discnumber,
+                medium.medium_number,
                 medium.album)
         #
-        self.mediumlist.append(medium)
+        try:
+            existing_medium = self.media_map[medium]
+        except KeyError as error:
+            if medium.medium_number in self.medium_numbers:
+                raise ValueError(
+                    'Medium #%s already attached!' % (
+                        medium.medium_number)) from error
+            #
+            self.media_map[medium] = medium
+        else:
+            # Merge tracks into the existing medium
+            for track in medium.tracks_list:
+                existing_medium.add_track(track)
+            #
+        #
 
     def __eq__(self, other):
         """Rich comparison: equals"""
@@ -270,205 +473,39 @@ class Release:
 #
 
 
-# =============================================================================
-# def determine_paths_to_rename(base_directory_path, first_side_tracks=None):
-#     """Examine the files in the provided directory
-#     and determine which ones are to be renamed.
-#     Return a list of (file_path, new_name) tuples.
-#     Log an error message if there seem to be
-#     different albums in one directory.
-#     """
-#     found_disc_numbers = set()
-#     expected_album = None
-#     all_files = []
-#     first_side_tracks = first_side_tracks or []
-#     for file_path in base_directory_path.glob('*'):
-#         full_file_path = base_directory_path / file_path
-#         try:
-#             current_audio_file = Track.from_path(full_file_path)
-#         except ValueError as error:
-#             logging.error('ValueError: %s', error)
-#             continue
-#         #
-#         all_files.append(current_audio_file)
-#         found_disc_numbers.add(current_audio_file.disc_number)
-#         track_album = Album.from_audio_file(current_audio_file)
-#         if expected_album:
-#             if track_album != expected_album:
-#                 logging.error(
-#                     'Album mismatch: expected %r by %s,'
-#                     ' but found %r by %s!',
-#                     expected_album.album,
-#                     expected_album.albumartist,
-#                     track_album.album,
-#                     track_album.albumartist)
-#             #
-#         else:
-#             expected_album = track_album
-#         #
-#     #
-#     # TODO
-#     return []
-# =============================================================================
-
+def get_release_from_path(base_directory_path):
+    """Get a Release object containing all the tracks in the
+    base directory path
+    """
+    absolute_base_directory = base_directory_path.absolute()
+    found_release = None
+    if not absolute_base_directory.is_dir():
+        raise ValueError('%s is not a directory' % absolute_base_directory)
+    #
+    for file_path in absolute_base_directory.glob('*'):
+        full_file_path = absolute_base_directory / file_path
+        if full_file_path.is_dir():
+            continue
+        #
+        try:
+            current_audio_track = Track.from_path(full_file_path)
+        except NoSupportedFile:
+            logging.debug(
+                'File %r not supported by taglib',
+                str(full_file_path))
+            continue
+        #
+        found_medium = Medium.from_track(current_audio_track)
+        if found_release is None:
+            found_release = Release.from_medium(found_medium)
+        else:
+            found_release.add_medium(found_medium)
+        #
+    #
+    if found_release is None:
+        raise ValueError('No release found in %s' % absolute_base_directory)
+    #
+    return found_release
 
 
 # vim: fileencoding=utf-8 sw=4 ts=4 sts=4 expandtab autoindent syntax=python:
-
-
-# =============================================================================
-# THE OLD PYTHON2 SCRIPT
-#
-#
-#
-# # Track numbers as given by sound juicer: d1t01, d1t02, etc.
-# RX_track = re.compile(
-#     r'\A d (?P<discno> \d) t (?P<trackno> \d+)',
-#     re.X
-# )
-#
-# def sidename(sideno):
-#     """
-#         Return record side name for side numbers starting with 0
-#
-#         0 -> A, 1 -> B, 2 -> C, 3 -> D, etc.
-#     """
-#     return chr(65 + sideno)
-#
-# # Prepare a list of dicts for keeping old and new filenames
-# # as well as disc and track numbers.
-# # Also remember track numbers per disc
-# filenamelist = [dict(old=x) for x in sorted(glob.glob('*.mp3'))]
-# tracks_per_disc = {}
-# #
-# for filename in filenamelist:
-#     matched_track = RX_track.match(filename['old'])
-#     if matched_track:
-#         for x in ('discno', 'trackno'):
-#             filename[x] = int(matched_track.group(x))
-#         tracks_per_disc.setdefault(filename['discno'], [])
-#         tracks_per_disc[filename['discno']].append(filename['trackno'])
-#     else:
-#         filename['new'] = None
-#     #
-# #
-#
-# if len(option.tracks_first_side) < len(tracks_per_disc):
-#     if not option.guess_tracks:
-#         parser.error(
-#             'Please specify number of first side tracks for all discs,'
-#             ' or give option "--guess" to let the script take a guess.'
-#         )
-#     logging.info(
-#         'Number of first side tracks not given for all discs, so I will'
-#         ' take a wild guess…'
-#     )
-#
-# # Allocate a dict containing track counts per side.
-# # Disc numbers in filenames start with 1, but we count record sides
-# # starting from 0
-# tracks_per_side = []
-# for discno in tracks_per_disc:
-#     tpd = tracks_per_disc[discno]
-#     max_tpd = max(tpd)
-#     len_tpd = len(tpd)
-#     try:
-#         first_side = int(option.tracks_first_side[discno - 1])
-#     except IndexError:
-#         first_side = divmod(max_tpd + 1, 2)[0]
-#         logging.info(
-#             'Side %s: Guessed %d tracks.' % (
-#                 sidename(len(tracks_per_side)),
-#                 first_side
-#             )
-#         )
-#     try:
-#         assert max_tpd == len_tpd
-#     except AssertionError:
-#         logging.debug(
-#             'Maximum track number "%d" on disc #%d'
-#             ' differs from number of tracks (%d).' % (
-#                 max_tpd,
-#                 discno,
-#                 len_tpd
-#             )
-#         )
-#     second_side = max_tpd - first_side
-#     tracks_per_side.append(first_side)
-#     tracks_per_side.append(second_side)
-# #
-# # Calculate maximum number of digits
-# # needed to represent each track number,
-# # based on the maximum new track number.
-# # Build the format string for the representation of the
-# # new track numbers in the file names
-# max_trackdigits = len(
-#     '%d' % max(tracks_per_side or [1])
-# )
-# fs_newtrackno = 'd%%d%%s%%0%dd' % max_trackdigits
-# count_renamed = 0
-#
-# for filename in filenamelist:
-#     # Read disc and track number, calculate side letter
-#     # and side-related track number.
-#     # Derive new track name from these calculated values.
-#     try:
-#         discno = filename['discno']
-#         trackno = filename['trackno']
-#     except KeyError:
-#         continue
-#     else:
-#         sideno = (discno - 1) * 2
-#         try:
-#             tracks_first_side = tracks_per_side[sideno]
-#         except IndexError:
-#             logging.debug(
-#                 'No number of tracks given'
-#                 ' for side %s (disc #%d)???' % (
-#                     sidename(sideno),
-#                     discno
-#                 )
-#             )
-#             tracks_first_side = 1
-#         if trackno > tracks_first_side:
-#             sideno += 1
-#             newtrackno = trackno - tracks_first_side
-#         else:
-#             newtrackno = trackno
-#         filename['new'] = RX_track.sub(
-#             fs_newtrackno % (
-#                 discno,
-#                 sidename(sideno),
-#                 newtrackno
-#             ),
-#             filename['old']
-#         )
-#     # Rename the file if a new file name exists and the option
-#     # "--dry-run" has not been given
-#     if filename['new']:
-#         logging.info(
-#             '[x] %s' % (
-#                 filename['old']
-#             )
-#         )
-#         logging.info(
-#             '--> %s' % (
-#                 filename['new']
-#             )
-#         )
-#         if option.dry_run:
-#             continue
-#         os.rename(filename['old'], filename['new'])
-#         count_renamed += 1
-#     #
-# #
-# logging.info(
-#     'Renamed %d out of %d files%s.' % (
-#         count_renamed,
-#         len(filenamelist),
-#         ' (DRY RUN)' if option.dry_run else ''
-#     )
-# )
-# sys.exit(0)
-#
-# =============================================================================
