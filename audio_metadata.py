@@ -25,6 +25,9 @@ import taglib
 # Constants
 #
 
+FS_MUSICBRAINZ_PARSEABLE_TRACK = \
+    '{0.display_prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
+FS_SUGGESTED_FILE_NAME = '{0.file_prefix}{0.ARTIST} - {0.TITLE}'
 
 PRX_INVALID_FILENAME = re.compile(r'["\*/:;<>\?\\\|]')
 PRX_KEYWORD = re.compile(r'\A[a-z]+\Z', re.I)
@@ -37,7 +40,7 @@ SAFE_REPLACEMENT = '_'
 #
 
 
-class ConversionNotRequired(Exception):
+class EncodingFixNotRequired(Exception):
 
     """Raised when the tags seem to be already correctly encoded"""
 
@@ -47,6 +50,13 @@ class ConversionNotRequired(Exception):
 class NoSupportedFile(Exception):
 
     """Raised when trying to open an unsupported file using taglib"""
+
+    ...
+
+
+class TagsNotChanged(Exception):
+
+    """Raised when the tags are not changed in the file"""
 
     ...
 
@@ -61,15 +71,14 @@ def fix_utf8(source_text):
     to UTF-8
     """
     if source_text.isascii():
-        raise ConversionNotRequired
+        raise EncodingFixNotRequired
     #
     try:
-        utf8_text = source_text.encode('latin-1').decode('utf-8')
+        fixed_text = source_text.encode('latin-1').decode('utf-8')
     except UnicodeError as error:
-        raise ConversionNotRequired from error
+        raise EncodingFixNotRequired from error
     #
-    logging.info('Fixed %r -> %r', source_text, utf8_text)
-    return utf8_text
+    return fixed_text
 
 
 #
@@ -77,19 +86,36 @@ def fix_utf8(source_text):
 #
 
 
-class Track:
+class SortableHashableMixin:
+
+    """Mixin for sortable and hashable objects"""
+
+    def __eq__(self, other):
+        """Rich comparison: equals"""
+        return str(self) == str(other)
+
+    def __hash__(self):
+        """Return a hash over the string representation"""
+        return hash(str(self))
+
+    def __lt__(self, other):
+        """Rich comparison: less than"""
+        return str(self) < str(other)
+
+    def __repr__(self):
+        """Return str implementation of str in child classes"""
+        return repr(str(self))
+
+
+class Track(SortableHashableMixin):
 
     """Object exposing an audio track's metadata"""
 
-    fs_display = (
-        '{0.display_prefix}{0.TITLE} – {0.ARTIST}'
-        ' ({0.display_duration})')
-    fs_file_stub = '{0.file_prefix}{0.ARTIST} - {0.TITLE}'
     fs_sided_prefix = 'd{0.medium_number}{0.sided_number}. '
     fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
     prx_special_number = re.compile(r'\Ad\d+([^t\d].+)\.\s')
     prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
-    supported_tags = {
+    managed_tags = {
         'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
         'DISCNUMBER', 'TITLE', 'TRACKNUMBER'}
     ignored_tags = {
@@ -114,32 +140,50 @@ class Track:
 
     @classmethod
     def from_path(cls, file_path):
-        """Read metatada from the file and return a Track instance"""
+        """Constructor method:
+        read metadata from the file and return a Track instance
+        """
         try:
             file_metadata = taglib.File(str(file_path))
         except OSError as error:
-            raise NoSupportedFile from error
+            if file_path.exists():
+                raise NoSupportedFile from error
+            #
+            raise
         #
         length = file_metadata.length
         tags_map = {}
-        tags_changed = False
+        got_encoding_errors = False
         for (key, values) in file_metadata.tags.items():
+            if key not in cls.managed_tags:
+                continue
+            #
             if values and PRX_KEYWORD.match(key):
                 current_value = values[0]
                 try:
-                    current_value = fix_utf8(current_value)
-                except ConversionNotRequired:
+                    new_value = fix_utf8(current_value)
+                except EncodingFixNotRequired:
                     pass
                 else:
-                    tags_changed = True
+                    if not got_encoding_errors:
+                        logging.warning(
+                            '%r: encoding fixes required',
+                            file_path.name)
+                    #
+                    logging.warning(
+                        ' * %s: %r → %r',
+                        key, current_value, new_value)
+                    current_value = new_value
+                    got_encoding_errors = True
                 #
                 tags_map[key] = current_value
             #
         #
-        return cls(file_path,
-                   length=length,
-                   tags_changed=tags_changed,
-                   **tags_map)
+        return cls(
+            file_path,
+            length=length,
+            tags_changed=got_encoding_errors,
+            **tags_map)
 
     @property
     def display_duration(self):
@@ -168,27 +212,40 @@ class Track:
         #
         return ''
 
-    def save_tags(self, force_write=False):
-        """Save the tags to the file"""
-        if self.__tags_changed or force_write:
+    def save_tags(self, simulation=False):
+        """Save the tags to the file and
+        return a dict of changes
+        """
+        if self.__tags_changed:
+            changes = {}
             file_metadata = taglib.File(str(self.file_path))
-            for tag_name in self.supported_tags:
-                file_metadata.tags[tag_name] = [self[tag_name]]
+            for tag_name in self.managed_tags:
+                try:
+                    previous_value = file_metadata.tags[tag_name][0]
+                except (IndexError, KeyError):
+                    previous_value = None
+                #
+                new_value = self[tag_name]
+                if previous_value != new_value:
+                    if new_value is None:
+                        file_metadata.tags[tag_name] = []
+                    else:
+                        file_metadata.tags[tag_name] = [new_value]
+                    #
+                    changes[tag_name] = (previous_value, new_value)
+                #
             #
-            file_metadata.save()
-            logging.info('Saved tags to %s', self.file_path)
-        else:
-            raise ConversionNotRequired
+            if changes and not simulation:
+                file_metadata.save()
+                self.__tags_changed = False
+            #
         #
-        self.__tags_changed = False
+        return changes
 
-    def suggested_filename(self, fmt=None):
+    def suggested_filename(self, fmt=FS_SUGGESTED_FILE_NAME):
         """Return a file name suggested from the tags,
         defused using the PRX_INVALID_FILENAME regular expression
         """
-        if fmt is None:
-            fmt = self.fs_file_stub
-        #
         stem = PRX_INVALID_FILENAME.sub(
             SAFE_REPLACEMENT,
             fmt.format(self))
@@ -202,17 +259,24 @@ class Track:
         """Update the provided tags given as strings
         and set the __tags_changed flag
         """
-        self.__set_tags(**tags_map)
-        self.__tags_changed = True
+        self.__tags_changed = self.__set_tags(**tags_map)
 
     def __set_tags(self, **tags_map):
-        """Set the provided tags given as strings"""
-        for tag_name in self.supported_tags:
+        """Set the provided tags given as strings.
+        Return true if any tags were changed, False otherwise.
+        """
+        tags_changed = False
+        for tag_name in self.managed_tags:
             try:
-                self.__tags[tag_name] = tags_map.pop(tag_name)
+                new_value = tags_map.pop(tag_name)
             except KeyError:
                 continue
+            old_value = self[tag_name]
+            if new_value == old_value:
+                continue
             #
+            self.__tags[tag_name] = new_value
+            tags_changed = True
         #
         if tags_map:
             unsupported_tags = ', '.join('%s=%r' % (key, value)
@@ -223,7 +287,7 @@ class Track:
                     'Ignored unsupported tag(s): %s.',
                     unsupported_tags)
         #
-        self.medium_number = int(self.__tags.get('DISCNUMBER', '1'), 10)
+        self.medium_number = int(self.DISCNUMBER or '1', 10)
         try:
             track_match = self.prx_track_and_total.match(
                 self.__tags['TRACKNUMBER'])
@@ -237,10 +301,7 @@ class Track:
                 self.total_tracks = int(total_tracks, 10)
             #
         #
-
-    def __eq__(self, other):
-        """Rich comparison: equals"""
-        return str(self) == str(other)
+        return tags_changed
 
     def __getattr__(self, name):
         """Return the tag value via attribute access"""
@@ -254,15 +315,10 @@ class Track:
 
     def __getitem__(self, name):
         """Return the tag value (dict-style access)"""
-        return self.__tags[name]
-
-    def __hash__(self):
-        """Return a hash over the string representation"""
-        return hash(str(self))
-
-    def __lt__(self, other):
-        """Rich comparison: less than"""
-        return str(self) < str(other)
+        if name in self.managed_tags:
+            return self.__tags.get(name)
+        #
+        raise KeyError(name)
 
     def __str__(self):
         """Return a string representation"""
@@ -277,7 +333,7 @@ class Track:
                 prefix, self))
 
 
-class Medium:
+class Medium(SortableHashableMixin):
 
     """Store medium metadata"""
 
@@ -285,59 +341,48 @@ class Medium:
                  album=None,
                  albumartist=None,
                  medium_number=None,
-                 total_tracks=None):
+                 declared_total_tracks=None):
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
         self.medium_number = medium_number
-        self.__declared_total_tracks = total_tracks
+        self.__declared_total_tracks = declared_total_tracks
         self.all_tracks = set()
 
     @classmethod
     def from_track(cls, track):
-        """Return a new medium from the track metadata"""
+        """Constructor method:
+        Return a new edium from the track metadata
+        """
         new_medium = cls(
             album=track.ALBUM,
             albumartist=track.ALBUMARTIST,
             medium_number=track.medium_number,
-            total_tracks=track.total_tracks)
+            declared_total_tracks=track.total_tracks)
         new_medium.add_track(track)
         return new_medium
 
     @property
-    def total_tracks(self):
-        """Return the number of tracks (either declared or counted)"""
-        return self.__declared_total_tracks or len(self.all_tracks)
+    def counted_tracks(self):
+        """Return the counted number of tracks"""
+        return len(self.all_tracks)
 
     @property
-    def tracks_list(self):
-        """Return the tracks as a sorted list"""
-        return sorted(self.all_tracks)
-
-    def add_track(self, track):
-        """Add the track to the tracklist"""
-        if track in self.all_tracks:
-            raise ValueError('Track %r already in tracklist!' % str(track))
-        #
-        self.all_tracks.add(track)
-
-    def find_errors(self):
-        """Yield a message for everything
-        that does not seem to be correct
-        """
-        tracklist = self.tracks_list
-        missing_tracks = self.total_tracks - len(tracklist)
-        surplus_tracks = 0 - missing_tracks
-        if missing_tracks > 0:
-            surplus_tracks = 0
-            yield '%s tracks missing!' % missing_tracks
-        elif surplus_tracks > 0:
-            missing_tracks = 0
-            yield '%s surplus tracks!' % surplus_tracks
+    def errors(self):
+        """Return a dict containing all errors"""
+        found_errors = {}
+        if self.__declared_total_tracks:
+            expected_tracks = self.__declared_total_tracks
+            if self.counted_tracks < self.__declared_total_tracks:
+                found_errors['missing'] = '%s tracks missing'
+            elif self.counted_tracks < self.__declared_total_tracks:
+                found_errors['surplus'] = '%s surplus tracks'
+            #
+        else:
+            expected_tracks = self.counted_tracks
         #
         seen_track_numbers = set()
-        duplicate_track_numbers = set()
-        expected_track_numbers = range(1, self.total_tracks + 1)
+        expected_track_numbers = range(1, expected_tracks + 1)
         continue_at = None
         for (index, expected_track_no) in enumerate(expected_track_numbers):
             if continue_at:
@@ -347,7 +392,7 @@ class Medium:
                 continue_at = None
             #
             try:
-                current_track = tracklist[index]
+                current_track = self.tracks_list[index]
             except IndexError:
                 break
             #
@@ -356,50 +401,42 @@ class Medium:
                 continue
             #
             if found_track_no in seen_track_numbers:
-                yield '%r -> duplicate track number #%s!' % (
-                    str(current_track), found_track_no)
-                duplicate_track_numbers.add(found_track_no)
-            else:
-                yield '%r -> track number #%s does not match expected #%s!' % (
-                    str(current_track), found_track_no, expected_track_no)
-                if found_track_no > expected_track_no:
-                    # Catch up when tracks are missing
-                    continue_at = found_track_no + 1
-                #
+                found_errors.setdefault('duplicate_numbers', []).append(
+                    current_track)
             #
             seen_track_numbers.add(found_track_no)
         #
         missing_track_numbers = \
             set(expected_track_numbers) - seen_track_numbers
         if missing_track_numbers:
-            yield 'Missing track numbers: %s' % ', '.join(
-                missing_track_numbers)
+            found_errors['missing_track_numbers'] = missing_track_numbers
         #
-        if duplicate_track_numbers:
-            yield 'Duplicated track numbers: %s' % ', '.join(
-                duplicate_track_numbers)
+        return found_errors
+
+    @property
+    def tracks_list(self):
+        """Return the tracks as a sorted list"""
+        return sorted(self.all_tracks)
+
+    def add_track(self, track):
+        """Add the track to the tracklist"""
+        if track in self.all_tracks:
+            raise ValueError('Track %r already in tracklist!' % track)
         #
+        self.all_tracks.add(track)
 
-    def __eq__(self, other):
-        """Rich comparison: equals"""
-        return str(self) == str(other)
-
-    def __hash__(self):
-        """Return a hash over the string representation"""
-        return hash(str(self))
-
-    def __lt__(self, other):
-        """Rich comparison: less than"""
-        return str(self) < str(other)
+    def tracks_as_text(self, fmt=FS_MUSICBRAINZ_PARSEABLE_TRACK):
+        """Return the tracks as a single string"""
+        return '\n'.join(fmt.format(track) for track in self.tracks_list)
 
     def __str__(self):
         """Return a string representation"""
         return (
-            'Medium #{0.medium_number}: {0.albumartist} – {0.album}'
-            ' ({0.total_tracks} tracks)'.format(self))
+            'Medium #{0.medium_number}:'
+            ' {0.albumartist} – {0.album}'.format(self))
 
 
-class Release:
+class Release(SortableHashableMixin):
 
     """Store release metadata"""
 
@@ -409,11 +446,13 @@ class Release:
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
-        self.media_map = {}
+        self.__media_map = {}
 
     @classmethod
     def from_medium(cls, medium):
-        """Return the release from the medium"""
+        """Constructor method:
+        Return a new release from the medium
+        """
         new_release = cls(
             album=medium.album,
             albumartist=medium.albumartist)
@@ -423,44 +462,52 @@ class Release:
     @property
     def medium_numbers(self):
         """Return a sorted list of medium numbers"""
-        return [medium.medium_number for medium in self.media_list]
+        return sorted(self.__media_map)
 
     @property
     def media_list(self):
         """Return a sorted list of media"""
-        return sorted(self.media_map)
+        return sorted(self.__media_map.values())
 
     def add_medium(self, medium):
-        """Add the medium to the mediumlist"""
-        if medium.album != self.album:
-            logging.warning(
-                'Medium #%s has a differing title: %r!',
-                medium.medium_number,
-                medium.album)
-        #
+        """Add the medium to the release"""
+        medium_number = medium.medium_number
         try:
-            existing_medium = self.media_map[medium]
-        except KeyError as error:
-            if medium.medium_number in self.medium_numbers:
-                raise ValueError(
-                    'Medium #%s already attached!' % (
-                        medium.medium_number)) from error
+            existing_medium = self[medium_number]
+        except KeyError:
+            if medium.album != self.album:
+                logging.warning(
+                    'Medium #%s has a differing title: %r!',
+                    medium_number,
+                    medium.album)
             #
-            self.media_map[medium] = medium
-        else:
-            # Merge tracks into the existing medium
-            for track in medium.tracks_list:
-                existing_medium.add_track(track)
-            #
+            logging.debug(
+                'Attaching %r to the release',
+                medium)
+            self.__media_map[medium_number] = medium
+            return
+        #
+        # Merge tracks into the existing medium
+        if medium != existing_medium:
+            raise ValueError(
+                'Medium #%s already attached – '
+                ' cannot merge %r into existing %r!' % (
+                    medium.medium_number,
+                    medium,
+                    existing_medium))
+        #
+        logging.debug(
+            'Merging %r tracklist into the tracklist'
+            ' of medium #%s',
+            medium,
+            medium_number)
+        for track in medium.tracks_list:
+            existing_medium.add_track(track)
         #
 
-    def __eq__(self, other):
-        """Rich comparison: equals"""
-        return str(self) == str(other)
-
-    def __hash__(self):
-        """Return a hash over the string representation"""
-        return hash(str(self))
+    def __getitem__(self, medium_number):
+        """Return the medium withthe given number"""
+        return self.__media_map[medium_number]
 
     def __str__(self):
         """Return a string representation"""
@@ -495,7 +542,9 @@ def get_release_from_path(base_directory_path):
                 str(full_file_path))
             continue
         #
+        logging.debug('Got track %r', current_audio_track)
         found_medium = Medium.from_track(current_audio_track)
+        logging.debug('Determined medium %r', found_medium)
         if found_release is None:
             found_release = Release.from_medium(found_medium)
         else:

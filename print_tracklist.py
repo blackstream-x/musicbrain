@@ -16,7 +16,6 @@ License: MIT, see LICENSE file
 
 import argparse
 import pathlib
-import re
 import sys
 
 # local modules
@@ -36,10 +35,6 @@ LOGGER = INTERROGATOR.logger
 RETURNCODE_OK = 0
 RETURNCODE_ERROR = 1
 
-PRX_MBID = re.compile(
-    r'.+? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
-    re.X)
-
 
 #
 # Classes
@@ -51,22 +46,6 @@ PRX_MBID = re.compile(
 #
 # Functions
 #
-
-
-def mbid(source_text):
-    """Return a musicbrainz ID from a string"""
-    try:
-        return PRX_MBID.match(source_text).group(1)
-    except AttributeError as error:
-        raise ValueError(
-            '%r does not contain a MusicBrainz ID' % source_text) from error
-    #
-
-
-def time_display(milliseconds):
-    """Return a time display (minutes:seconds)"""
-    seconds = (milliseconds + 500) / 1000
-    return '%d:%02d' % divmod(seconds, 60)
 
 
 def __get_arguments():
@@ -91,11 +70,15 @@ def __get_arguments():
     argument_parser.add_argument(
         '--fix-tag-encoding',
         action='store_true',
-        help='Fix tag encoding if required')
+        help='Fix tag encoding if required.'
+        ' This functionality is currently DISABLED and will be'
+        ' implemented in a separate script.')
     argument_parser.add_argument(
         '-d', '--directory',
         type=pathlib.Path,
-        help='A directory to print the tracklist from (default: %(default)s')
+        help='A directory to print the tracklist from'
+        ' (defaults to the current directory, in this case:'
+        '%(default)s)')
     return argument_parser.parse_args()
 
 
@@ -108,16 +91,7 @@ def main(arguments):
     LOGGER.heading(str(found_release), style=LOGGER.box_formatter.double)
     for medium in found_release.media_list:
         LOGGER.heading(str(medium))
-        for track in medium.tracks_list:
-            print(track.fs_display.format(track))
-            if arguments.fix_tag_encoding:
-                try:
-                    track.save_tags()
-                except audio_metadata.ConversionNotRequired:
-                    pass
-                #
-            #
-        #
+        print(medium.tracks_as_text())
     #
     return RETURNCODE_OK
 
