@@ -51,7 +51,7 @@ RETURNCODE_ERROR = 1
 def __get_arguments():
     """Parse command line arguments"""
     argument_parser = argparse.ArgumentParser(
-        description='Get and print data from a musicbrainz release')
+        description='Print a tracklist from the release in a directory')
     argument_parser.set_defaults(
         loglevel=dialog.logging.INFO,
         directory=pathlib.Path.cwd())

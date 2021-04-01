@@ -25,6 +25,7 @@ import taglib
 # Constants
 #
 
+FS_DISPLAY_TRACK = '{0.display_prefix}{0.ARTIST} – {0.TITLE}'
 FS_MUSICBRAINZ_PARSEABLE_TRACK = \
     '{0.display_prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
 FS_SUGGESTED_FILE_NAME = '{0.file_prefix}{0.ARTIST} - {0.TITLE}'
@@ -113,7 +114,7 @@ class Track(SortableHashableMixin):
 
     fs_sided_prefix = 'd{0.medium_number}{0.sided_number}. '
     fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
-    prx_special_number = re.compile(r'\Ad\d+([^t\d].+)\.\s')
+    prx_special_number = re.compile(r'\Ad\d+([^t\d].*?)\.\s')
     prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
     managed_tags = {
         'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
@@ -333,9 +334,23 @@ class Track(SortableHashableMixin):
                 prefix, self))
 
 
+class MediumSides:
+
+    """Store the sides of a medium"""
+
+    def __init__(self,
+                 side_ids=None,
+                 first_side_tracks=None):
+        """Store the sides of a medium"""
+        self.first_side_id, self.second_side_id = side_ids
+        self.first_side_tracks = first_side_tracks
+
+
 class Medium(SortableHashableMixin):
 
     """Store medium metadata"""
+
+    prx_sided_number = re.compile(r'\A([^\d]+)(?:(\d+))?\Z')
 
     def __init__(self,
                  album=None,
@@ -368,50 +383,10 @@ class Medium(SortableHashableMixin):
         return len(self.all_tracks)
 
     @property
-    def errors(self):
-        """Return a dict containing all errors"""
-        found_errors = {}
-        if self.__declared_total_tracks:
-            expected_tracks = self.__declared_total_tracks
-            if self.counted_tracks < self.__declared_total_tracks:
-                found_errors['missing'] = '%s tracks missing'
-            elif self.counted_tracks < self.__declared_total_tracks:
-                found_errors['surplus'] = '%s surplus tracks'
-            #
-        else:
-            expected_tracks = self.counted_tracks
-        #
-        seen_track_numbers = set()
-        expected_track_numbers = range(1, expected_tracks + 1)
-        continue_at = None
-        for (index, expected_track_no) in enumerate(expected_track_numbers):
-            if continue_at:
-                if continue_at > expected_track_no:
-                    continue
-                #
-                continue_at = None
-            #
-            try:
-                current_track = self.tracks_list[index]
-            except IndexError:
-                break
-            #
-            found_track_no = current_track.track_number
-            if found_track_no == expected_track_no:
-                continue
-            #
-            if found_track_no in seen_track_numbers:
-                found_errors.setdefault('duplicate_numbers', []).append(
-                    current_track)
-            #
-            seen_track_numbers.add(found_track_no)
-        #
-        missing_track_numbers = \
-            set(expected_track_numbers) - seen_track_numbers
-        if missing_track_numbers:
-            found_errors['missing_track_numbers'] = missing_track_numbers
-        #
-        return found_errors
+    def default_side_ids(self):
+        """Calculate default side IDs an return them as a tuple"""
+        first_side_codepoint = 63 + 2 * self.medium_number
+        return (chr(first_side_codepoint), chr(first_side_codepoint + 1))
 
     @property
     def tracks_list(self):
@@ -424,6 +399,175 @@ class Medium(SortableHashableMixin):
             raise ValueError('Track %r already in tracklist!' % track)
         #
         self.all_tracks.add(track)
+
+    def get_tracks_map(self):
+        """Return a tuple:
+        (tracks_map, total_tracks, found_errors)
+        """
+        found_errors = {}
+        tracks_map = {}
+        if self.__declared_total_tracks:
+            total_tracks_count = self.__declared_total_tracks
+            missing_tracks_count = total_tracks_count - self.counted_tracks
+            if missing_tracks_count > 0:
+                found_errors['total missing'] = missing_tracks_count
+            elif missing_tracks_count < 0:
+                found_errors['total surplus'] = -missing_tracks_count
+            #
+        else:
+            total_tracks_count = self.counted_tracks
+        #
+        expected_track_numbers = [
+            track_number + 1 for track_number in range(total_tracks_count)]
+        for current_track in self.all_tracks:
+            found_track_number = current_track.track_number
+            if found_track_number not in expected_track_numbers \
+                    or found_track_number in tracks_map:
+                # ignore tracks with unexpected numbers
+                # and tracks with a duplicate track number
+                found_errors.setdefault('ignored_tracks', set()).add(
+                    current_track)
+                continue
+            #
+            tracks_map[found_track_number] = current_track
+        #
+        missing_track_numbers = \
+            set(expected_track_numbers) - set(tracks_map)
+        if missing_track_numbers:
+            found_errors['missing_numbers'] = missing_track_numbers
+        #
+        return (tracks_map, total_tracks_count, found_errors)
+
+    def autodetect_sides(self, fix_sided_numbers=False):
+        """Analyze the tracklist and return a tuple:
+        (detected_sides, total_tracks, first_side_tracks, found_errors).
+        Requires all tracks to have a proper track number.
+        """
+        (tracks_map, total_tracks_count, found_errors) = self.get_tracks_map()
+        detected_sides = []
+        current_side = None
+        determined_first_side_tracks = None
+        for (track_number, current_track) in sorted(tracks_map.items()):
+            existing_sided_number = current_track.sided_number
+            if existing_sided_number:
+                sided_match = self.prx_sided_number.match(
+                    existing_sided_number)
+                current_side = sided_match.group(1)
+                if current_side not in detected_sides:
+                    detected_sides.append(current_side)
+                #
+                if sided_match.group(2):
+                    sided_track_number = int(sided_match.group(2), 10)
+                else:
+                    sided_track_number = 1
+                #
+                fixed_sided_number = None
+                if len(detected_sides) == 1:
+                    if sided_track_number != track_number:
+                        fixed_sided_number = '%s%d' % (
+                            current_side, track_number)
+                    #
+                elif len(detected_sides) == 2:
+                    if current_side != detected_sides[-1]:
+                        current_side = detected_sides[-1]
+                        fixed_sided_number = '%s%d' % (
+                            current_side,
+                            track_number)
+                    #
+                    if determined_first_side_tracks:
+                        correct_no = \
+                            track_number - determined_first_side_tracks
+                        if sided_track_number != correct_no:
+                            fixed_sided_number = '%s%d' % (
+                                current_side,
+                                correct_no)
+                        #
+                    else:
+                        determined_first_side_tracks = \
+                            track_number - sided_track_number
+                    #
+                #
+                if fixed_sided_number:
+                    if fix_sided_numbers:
+                        current_track.sided_number = fixed_sided_number
+                        logging.info(
+                            'Sided number %s: fixed to %s',
+                            existing_sided_number,
+                            fixed_sided_number)
+                    else:
+                        found_errors.setdefault(
+                            'tracks with wrong sided numbers',
+                            set()).add(current_track)
+                    #
+                #
+            #
+        #
+        return (detected_sides,
+                total_tracks_count,
+                determined_first_side_tracks,
+                found_errors)
+
+    def determine_sides(self, fix_sided_numbers=False):
+        """Determine sides either from the read sided track numbers
+        or guessed.
+        Return a MediumSides instance.
+        """
+        (detected_sides, total_tracks, first_side_tracks, found_errors) = \
+            self.autodetect_sides(fix_sided_numbers=fix_sided_numbers)
+        try:
+            first_side_id = detected_sides.pop(0)
+            try:
+                second_side_id = detected_sides.pop(0)
+            except IndexError:
+                # One-sided medium,
+                # calculate the second side ID just in case
+                first_side_tracks = total_tracks
+                second_side_id = '%s%s' % (
+                    first_side_id[:-1],
+                    chr(ord(first_side_id[:-1]) + 1))
+            #
+            if detected_sides:
+                found_errors['surplus sides'] = detected_sides
+            #
+        except IndexError:
+            # Guess first side tracks and calculate side IDs
+            first_side_tracks = round(total_tracks / 2)
+            first_side_id, second_side_id = self.default_side_ids
+            logging.info(
+                'Guessed side %s with %d tracks'
+                ' and side %s with %s tracks',
+                first_side_id,
+                first_side_tracks,
+                second_side_id,
+                total_tracks - first_side_tracks)
+        #
+        if found_errors:
+            raise ValueError(
+                '\n'.join(
+                    '%s: %r' % (category, data)
+                    for (category, data) in found_errors.items()))
+        #
+        return MediumSides(
+            side_ids=(first_side_id, second_side_id),
+            first_side_tracks=first_side_tracks)
+
+    def apply_sides(self, medium_sides):
+        """Set the sided_number attribute of all eligible tracks
+        to thevalues determined by de given MediumSides object
+        """
+        (tracks_map, total_tracks_count, found_errors) = self.get_tracks_map()
+        for (track_number, track) in tracks_map.items():
+            if track_number > medium_sides.first_side_tracks:
+                sided_number = '%s%d' % (
+                    medium_sides.second_side_id,
+                    track_number - medium_sides.first_side_tracks)
+            else:
+                sided_number = '%s%d' % (
+                    medium_sides.first_side_id,
+                    track_number)
+            #
+            track.sided_number = sided_number
+        #
 
     def tracks_as_text(self, fmt=FS_MUSICBRAINZ_PARSEABLE_TRACK):
         """Return the tracks as a single string"""
