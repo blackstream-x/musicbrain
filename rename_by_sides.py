@@ -78,6 +78,11 @@ def __get_arguments():
         type=int,
         help='Select medium number MEDIUM (%(default)s)')
     argument_parser.add_argument(
+        '-s', '--side-names',
+        nargs=2,
+        help='Set side names (default: A B for the first medium,'
+        ' C D for the second etc)')
+    argument_parser.add_argument(
         '-d', '--directory',
         type=pathlib.Path,
         help='A directory to print the tracklist from'
@@ -103,7 +108,8 @@ def main(arguments):
             side_ids=medium.default_side_ids,
             first_side_tracks=arguments.first_side_tracks)
     else:
-        medium_sides = medium.determine_sides()
+        medium_sides = medium.determine_sides(
+            side_ids=arguments.side_names)
     #
     medium.apply_sides(medium_sides)
     renamings = []
@@ -116,10 +122,18 @@ def main(arguments):
                 '      to %r',
                 old_name,
                 new_name)
-        renamings.append((old_name, new_name))
+        renamings.append((track.file_path, new_name))
     #
-    # TODO: confirm and rename
-    return RETURNCODE_OK
+    if INTERROGATOR.confirm('Rename these files?'):
+        for (old_track_path, new_name) in renamings:
+            new_track_path = old_track_path.parent / new_name
+            old_track_path.rename(new_track_path)
+            LOGGER.info('Renamed %s to %s', old_track_path, new_track_path)
+        #
+        return RETURNCODE_OK
+    #
+    LOGGER.info('Not confirmed -> end.')
+    return RETURNCODE_ERROR
 
 
 if __name__ == '__main__':

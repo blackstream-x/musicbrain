@@ -250,9 +250,9 @@ class Track(SortableHashableMixin):
         stem = PRX_INVALID_FILENAME.sub(
             SAFE_REPLACEMENT,
             fmt.format(self))
-        # Replace a trailing dot as well
-        if stem.endswith('.'):
-            stem = stem[:-1] + SAFE_REPLACEMENT
+        # XXX: Replace a trailing dot as well
+        # if stem.endswith('.'):
+        #     stem = stem[:-1] + SAFE_REPLACEMENT
         #
         return stem + self.file_path.suffix
 
@@ -507,7 +507,7 @@ class Medium(SortableHashableMixin):
                 determined_first_side_tracks,
                 found_errors)
 
-    def determine_sides(self, fix_sided_numbers=False):
+    def determine_sides(self, fix_sided_numbers=False, side_ids=None):
         """Determine sides either from the read sided track numbers
         or guessed.
         Return a MediumSides instance.
@@ -531,8 +531,8 @@ class Medium(SortableHashableMixin):
             #
         except IndexError:
             # Guess first side tracks and calculate side IDs
-            first_side_tracks = round(total_tracks / 2)
-            first_side_id, second_side_id = self.default_side_ids
+            first_side_tracks = int(total_tracks / 2)
+            first_side_id, second_side_id = side_ids or self.default_side_ids
             logging.info(
                 'Guessed side %s with %d tracks'
                 ' and side %s with %s tracks',
@@ -553,18 +553,28 @@ class Medium(SortableHashableMixin):
 
     def apply_sides(self, medium_sides):
         """Set the sided_number attribute of all eligible tracks
-        to thevalues determined by de given MediumSides object
+        to the values determined by de given MediumSides object
         """
         (tracks_map, total_tracks_count, found_errors) = self.get_tracks_map()
+        second_side_tracks = \
+            total_tracks_count - medium_sides.first_side_tracks
         for (track_number, track) in tracks_map.items():
             if track_number > medium_sides.first_side_tracks:
-                sided_number = '%s%d' % (
-                    medium_sides.second_side_id,
-                    track_number - medium_sides.first_side_tracks)
+                if second_side_tracks == 1:
+                    sided_number = medium_sides.second_side_id
+                else:
+                    sided_number = '%s%d' % (
+                        medium_sides.second_side_id,
+                        track_number - medium_sides.first_side_tracks)
+                #
             else:
-                sided_number = '%s%d' % (
-                    medium_sides.first_side_id,
-                    track_number)
+                if medium_sides.first_side_tracks == 1:
+                    sided_number = medium_sides.first_side_id
+                else:
+                    sided_number = '%s%d' % (
+                        medium_sides.first_side_id,
+                        track_number)
+                #
             #
             track.sided_number = sided_number
         #
