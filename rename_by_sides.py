@@ -100,6 +100,15 @@ def main(arguments):
     sided_medium.set_sides(
         *arguments.side_names,
         first_side_tracks=arguments.first_side_tracks)
+    side_lengths = [
+        sided_medium.accumulated_track_lengths(side_number)
+        for side_number in range(2)]
+    LOGGER.debug(
+        'Total duration: %02d:%02d' % divmod(sum(side_lengths), 60))
+    LOGGER.debug(
+        ' * First side:  %02d:%02d' % divmod(side_lengths[0], 60))
+    LOGGER.debug(
+        ' * Second side: %02d:%02d' % divmod(side_lengths[1], 60))
     renamings = []
     for track in sided_medium.tracks_list:
         old_name = track.file_path.name
