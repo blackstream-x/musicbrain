@@ -37,13 +37,6 @@ RETURNCODE_ERROR = 1
 
 
 #
-# Classes
-#
-
-
-
-
-#
 # Functions
 #
 
@@ -52,9 +45,7 @@ def __get_arguments():
     """Parse command line arguments"""
     argument_parser = argparse.ArgumentParser(
         description='Print a tracklist from the release in a directory')
-    argument_parser.set_defaults(
-        loglevel=dialog.logging.INFO,
-        directory=pathlib.Path.cwd())
+    argument_parser.set_defaults(loglevel=dialog.logging.INFO)
     argument_parser.add_argument(
         '-v', '--verbose',
         action='store_const',
@@ -76,6 +67,7 @@ def __get_arguments():
     argument_parser.add_argument(
         '-d', '--directory',
         type=pathlib.Path,
+        default=pathlib.Path.cwd(),
         help='A directory to print the tracklist from'
         ' (defaults to the current directory, in this case:'
         '%(default)s)')

@@ -38,13 +38,6 @@ RETURNCODE_ERROR = 1
 
 
 #
-# Classes
-#
-
-
-
-
-#
 # Functions
 #
 
@@ -53,10 +46,7 @@ def __get_arguments():
     """Parse command line arguments"""
     argument_parser = argparse.ArgumentParser(
         description='Rename tracks by medium sides')
-    argument_parser.set_defaults(
-        loglevel=dialog.logging.INFO,
-        directory=pathlib.Path.cwd(),
-        medium=1)
+    argument_parser.set_defaults(loglevel=dialog.logging.INFO)
     argument_parser.add_argument(
         '-v', '--verbose',
         action='store_const',
@@ -76,15 +66,18 @@ def __get_arguments():
     argument_parser.add_argument(
         '-m', '--medium',
         type=int,
+        default=1,
         help='Select medium number MEDIUM (%(default)s)')
     argument_parser.add_argument(
         '-s', '--side-names',
         nargs=2,
+        default=[],
         help='Set side names (default: A B for the first medium,'
         ' C D for the second etc)')
     argument_parser.add_argument(
         '-d', '--directory',
         type=pathlib.Path,
+        default=pathlib.Path.cwd(),
         help='A directory to print the tracklist from'
         ' (defaults to the current directory, in this case:'
         '%(default)s)')
@@ -99,21 +92,16 @@ def main(arguments):
     found_release = audio_metadata.get_release_from_path(arguments.directory)
     LOGGER.heading(str(found_release), style=LOGGER.box_formatter.double)
     try:
-        medium = found_release[arguments.medium]
+        sided_medium = audio_metadata.SidedMedium.from_medium(
+            found_release[arguments.medium])
     except KeyError:
         LOGGER.exit_with_error('Medium #%s not found', arguments.medium)
     #
-    if arguments.first_side_tracks is not None:
-        medium_sides = audio_metadata.MediumSides(
-            side_ids=medium.default_side_ids,
-            first_side_tracks=arguments.first_side_tracks)
-    else:
-        medium_sides = medium.determine_sides(
-            side_ids=arguments.side_names)
-    #
-    medium.apply_sides(medium_sides)
+    sided_medium.set_sides(
+        *arguments.side_names,
+        first_side_tracks=arguments.first_side_tracks)
     renamings = []
-    for track in medium.tracks_list:
+    for track in sided_medium.tracks_list:
         old_name = track.file_path.name
         new_name = track.suggested_filename()
         if new_name != old_name:
@@ -122,7 +110,13 @@ def main(arguments):
                 '      to %r',
                 old_name,
                 new_name)
-        renamings.append((track.file_path, new_name))
+            renamings.append((track.file_path, new_name))
+        #
+    #
+    if not renamings:
+        LOGGER.info(
+            'All files already named correctly. No further action required.')
+        return RETURNCODE_OK
     #
     if INTERROGATOR.confirm('Rename these files?'):
         for (old_track_path, new_name) in renamings:

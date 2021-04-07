@@ -62,6 +62,24 @@ class TagsNotChanged(Exception):
     ...
 
 
+class TrackNumberBelowMinimum(Exception):
+
+    """Raised when a track number is lower than the minimum
+    for a side or medium
+    """
+
+    ...
+
+
+class TrackNumberAboveMaximum(Exception):
+
+    """Raised when a track number is higher than the maximum
+    for a side or medium
+    """
+
+    ...
+
+
 #
 # Helper functions
 #
@@ -250,10 +268,6 @@ class Track(SortableHashableMixin):
         stem = PRX_INVALID_FILENAME.sub(
             SAFE_REPLACEMENT,
             fmt.format(self))
-        # XXX: Replace a trailing dot as well
-        # if stem.endswith('.'):
-        #     stem = stem[:-1] + SAFE_REPLACEMENT
-        #
         return stem + self.file_path.suffix
 
     def update_tags(self, **tags_map):
@@ -280,8 +294,8 @@ class Track(SortableHashableMixin):
             tags_changed = True
         #
         if tags_map:
-            unsupported_tags = ', '.join('%s=%r' % (key, value)
-                for (key, value) in tags_map.items()
+            unsupported_tags = ', '.join(
+                '%s=%r' % (key, value) for (key, value) in tags_map.items()
                 if key not in self.ignored_tags)
             if unsupported_tags:
                 logging.warning(
@@ -332,20 +346,6 @@ class Track(SortableHashableMixin):
             '{0}{1.ARTIST} – {1.TITLE}'
             ' (from {1.ALBUMARTIST} – {1.ALBUM} [{1.DATE}])'.format(
                 prefix, self))
-
-
-# =============================================================================
-# class MediumSides:
-#
-#     """Store the sides of a medium"""
-#
-#     def __init__(self,
-#                  side_ids=None,
-#                  first_side_tracks=None):
-#         """Store the sides of a medium"""
-#         self.first_side_id, self.second_side_id = side_ids
-#         self.first_side_tracks = first_side_tracks
-# =============================================================================
 
 
 class Medium(SortableHashableMixin):
@@ -431,23 +431,26 @@ class MediumSide:
     """Store one side of a sided medium"""
 
     def __init__(self,
-                 name=None,
+                 name,
                  maximum_track_number=1,
                  offset=0):
         """Store one side of a medium"""
         self.name = name
         self.number_of_tracks = maximum_track_number - offset
         self.track_number_offset = offset
+        logging.debug(
+            'MediumSide %s with %s tracks (offset: %s)',
+            self.name,
+            self.number_of_tracks,
+            self.track_number_offset)
 
     def get_sided_number(self, track_number):
         """Return a sided number"""
         sided_track_number = track_number - self.track_number_offset
         if sided_track_number < 1:
-            raise ValueError(
-                'Track number %s too low for this side' % track_number)
+            raise TrackNumberBelowMinimum
         if sided_track_number > self.number_of_tracks:
-            raise ValueError(
-                'Track number %s too high for this side' % track_number)
+            raise TrackNumberAboveMaximum
         #
         if self.number_of_tracks == 1:
             return self.name
@@ -463,18 +466,24 @@ class BothSides:
     """Store both sides of a sided medium"""
 
     def __init__(self,
-                 first_side_name=None,
-                 second_side_name=None,
+                 first_side_name,
+                 second_side_name,
                  total_tracks=1,
                  first_side_tracks=0):
         """Store one side of a medium"""
+        if first_side_tracks < 0:
+            raise ValueError('first_side_tracks must be greater than 0!')
+        #
+        if total_tracks < first_side_tracks:
+            raise ValueError('total_tracks must be >= first_side_tracks!')
+        #
         self.total_tracks = total_tracks
         self.first_side = MediumSide(
-            name=first_side_name,
+            first_side_name,
             maximum_track_number=first_side_tracks,
             offset=0)
         self.second_side = MediumSide(
-            name=second_side_name,
+            second_side_name,
             maximum_track_number=total_tracks,
             offset=first_side_tracks)
 
@@ -482,7 +491,7 @@ class BothSides:
         """Return a sided number"""
         try:
             return self.first_side.get_sided_number(track_number)
-        except ValueError:
+        except TrackNumberAboveMaximum:
             return self.second_side.get_sided_number(track_number)
         #
 
@@ -512,11 +521,18 @@ class SidedMedium(Medium):
         self.both_sides = None
         self.__duplicate_tracks = set()
 
-    @property
-    def default_side_names(self):
-        """Calculate default side names and return them as a tuple"""
-        first_side_codepoint = 63 + 2 * self.medium_number
-        return (chr(first_side_codepoint), chr(first_side_codepoint + 1))
+    @classmethod
+    def from_medium(cls, medium):
+        """Create a SidedMedium form a Medium instance"""
+        new_sided_medium = cls(
+            album=medium.album,
+            albumartist=medium.albumartist,
+            medium_number=medium.medium_number,
+            declared_total_tracks=medium.declared_total_tracks)
+        for track in medium.tracks_list:
+            new_sided_medium.add_track(track)
+        #
+        return new_sided_medium
 
     @property
     def effective_total_tracks(self):
@@ -536,6 +552,13 @@ class SidedMedium(Medium):
             '%s: %r' % (category, data)
             for (category, data) in self.errors.items())
 
+    @staticmethod
+    def successor_side_name(side_name):
+        """Return a successor side name by incrementing
+        the (last) code point
+        """
+        return '%s%s' % (side_name[:-1], chr(ord(side_name[-1]) + 1))
+
     def add_track(self, track):
         """Add a single track to the tracklist"""
         super().add_track(track)
@@ -545,6 +568,28 @@ class SidedMedium(Medium):
         else:
             self.tracks_map[track.track_number] = track
         #
+
+    def get_side_names(self, *preset_side_names):
+        """Return side names as a tuple.
+        Calculate default side names based on the medium number
+        (A and B for the first medium, C and D for the second one, ...)
+        if no side names were given
+        """
+        if len(preset_side_names) > 2:
+            raise ValueError('2 sides allowed only!')
+        #
+        try:
+            first_side_name = preset_side_names[0]
+        except IndexError:
+            first_side_codepoint = 63 + 2 * self.medium_number
+            return (chr(first_side_codepoint), chr(first_side_codepoint + 1))
+        #
+        try:
+            second_side_name = preset_side_names[1]
+        except IndexError:
+            second_side_name = self.successor_side_name(first_side_name)
+        #
+        return (first_side_name, second_side_name)
 
     def determine_errors(self):
         """Find errors and write them to the errors dict"""
@@ -564,7 +609,7 @@ class SidedMedium(Medium):
             track_number + 1 for track_number
             in range(self.effective_total_tracks))
         for (track_number, track) in self.tracks_map.items():
-            if track_number not in expected_track_numbers :
+            if track_number not in expected_track_numbers:
                 # ignore tracks with unexpected numbers
                 ignored_track_numbers.add(track_number)
                 self.errors.setdefault(self.kw_ignored_tracks, set()).add(
@@ -581,8 +626,7 @@ class SidedMedium(Medium):
         #
 
     def get_declared_sides(self):
-        """Analyze the tracklist and return a tuple:
-        (detected_sides, first_side_tracks).
+        """Analyze the tracklist and return a BothSides instance.
         Requires all tracks to have a proper track number.
         """
         self.determine_errors()
@@ -637,21 +681,26 @@ class SidedMedium(Medium):
                 #
             #
         #
+        if not detected_sides:
+            raise ValueError('No sides detected!')
+        #
+        first_side_name, second_side_name = \
+            self.get_side_names(*detected_sides)
         if first_side_tracks is None:
             # One-sided medium: all tracks on the first side
             first_side_tracks = self.effective_total_tracks
         #
-        return (detected_sides, first_side_tracks)
+        logging.debug('Got declared sides:')
+        return BothSides(
+            first_side_name,
+            second_side_name,
+            total_tracks=self.effective_total_tracks,
+            first_side_tracks=first_side_tracks)
 
-    def guess_sides(self, side_names=None):
+    def guess_sides(self, *side_names):
         """Guess sides by track lengths.
         Return a tuple of two MediumSide instances.
         """
-        try:
-            first_side_name, second_side_name = side_names
-        except TypeError:
-            first_side_name, second_side_name = self.default_side_names
-        #
         accumulated_time = 0
         last_track_number = 0
         total_time = sum(track.length for track in self.tracks_map.values())
@@ -669,86 +718,66 @@ class SidedMedium(Medium):
         else:
             raise ValueError('Could not determine first side tracks')
         #
+        first_side_name, second_side_name = self.get_side_names(*side_names)
+        logging.debug('Guessed sides:')
         return BothSides(
-            first_side_name=first_side_name,
-            second_side_name=second_side_name,
+            first_side_name,
+            second_side_name,
             total_tracks=self.effective_total_tracks,
             first_side_tracks=first_side_tracks)
 
-    def autodetect_sides(self, side_names=None):
-        """Determine sides either from the read sided track numbers
+    def set_sides(self, *side_names, first_side_tracks=None):
+        """Set sides either from the read sided track numbers
         or guessed.
         Return a MediumSides instance.
         """
-        (detected_sides, first_side_tracks) = \
-            self.get_declared_sides()
-        try:
-            first_side_name = detected_sides.pop(0)
+        if first_side_tracks is None:
             try:
-                second_side_name = detected_sides.pop(0)
-            except IndexError:
-                # One-sided medium,
-                # calculate the second side name just in case
-                second_side_name='%s%s' % (
-                    first_side_name[:-1],
-                    chr(ord(first_side_name[:-1]) + 1))
+                both_sides = self.get_declared_sides()
+            except ValueError:
+                both_sides = self.guess_sides(*side_names)
             #
+        else:
+            self.determine_errors()
+            first_side_name, second_side_name = \
+                self.get_side_names(*side_names)
+            logging.debug('Applying manually set sides:')
             both_sides = BothSides(
-                first_side_name=first_side_name,
-                second_side_name=second_side_name,
+                first_side_name,
+                second_side_name,
                 total_tracks=self.effective_total_tracks,
                 first_side_tracks=first_side_tracks)
-            if detected_sides:
-                self.errors['surplus sides'] = detected_sides
-            #
-        except IndexError:
-            # Guess sides
-            both_sides = self.guess_sides(side_names=side_names)
-            logging.info(
-                'Guessed side {0.name} with {0.number_of_tracks} tracks'
-                ' and side {1.name} with {1.number_of_tracks} tracks'.format(
-                both_sides.first_side,
-                both_sides.second_side))
         #
         if self.errors:
             raise ValueError(self.error_string)
         #
+        # Store the both_sides attribute
         self.both_sides = both_sides
-
-    def set_sides(self, side_names=None, first_side_tracks=None):
-        """Set medium sides"""
-        if first_side_tracks is None:
-            self.autodetect_sides(side_names=side_names)
-            return
-        #
-        self.determine_errors()
-        if first_side_tracks < 0 or \
-                first_side_tracks > self.effective_total_tracks:
-            raise ValueError('Out of range')
-        #
-        if self.errors:
-            raise ValueError(self.error_string)
-        #
-        try:
-            first_side_name, second_side_name = side_names
-        except TypeError:
-            first_side_name, second_side_name = self.default_side_names
-        #
-        self.both_sides = BothSides(
-            first_side_name=first_side_name,
-            second_side_name=second_side_name,
-            total_tracks=self.effective_total_tracks,
-            first_side_tracks=first_side_tracks)
-        #
+        self.apply_sided_numbering()
 
     def apply_sided_numbering(self):
-        """Set the sided_number attribute of all eligible tracks
-        to the values determined by the sides configuration
-        """
+        """Apply sided numbering and count sides lengths"""
+        first_side = self.both_sides.first_side
+        second_side = self.both_sides.second_side
+        first_side_length = 0
+        second_side_length = 0
         for (track_number, track) in sorted(self.tracks_map.items()):
-            track.sided_number = self.both_sides.sided_number_for(
-                track_number)
+            try:
+                track.sided_number = first_side.get_sided_number(track_number)
+            except TrackNumberAboveMaximum:
+                track.sided_number = second_side.get_sided_number(track_number)
+                second_side_length += track.length
+            else:
+                first_side_length += track.length
+            #
         #
+        total_duration = first_side_length + second_side_length
+        logging.debug(
+            'Total duration: %02d:%02d' % divmod(total_duration, 60))
+        logging.debug(
+            ' * First side:  %02d:%02d' % divmod(first_side_length, 60))
+        logging.debug(
+            ' * Second side: %02d:%02d' % divmod(second_side_length, 60))
 
     def __str__(self):
         """Return a string representation"""
@@ -835,7 +864,6 @@ class Release(SortableHashableMixin):
         return '{0.albumartist} – {0.album}'.format(self)
 
 
-
 #
 # Functions
 #
@@ -864,11 +892,7 @@ def get_release_from_path(base_directory_path):
             continue
         #
         logging.debug('Got track %r', current_audio_track)
-        if found_release is None:
-            found_medium = Medium.from_track(current_audio_track)
-            logging.debug('Determined medium %r', found_medium)
-            found_release = Release.from_medium(found_medium)
-        else:
+        if found_release:
             try:
                 found_medium = found_release[
                     current_audio_track.medium_number]
@@ -878,6 +902,10 @@ def get_release_from_path(base_directory_path):
             else:
                 found_medium.add_track(current_audio_track)
             #
+        else:
+            found_medium = Medium.from_track(current_audio_track)
+            logging.debug('Determined medium %r', found_medium)
+            found_release = Release.from_medium(found_medium)
         #
     #
     if found_release is None:
