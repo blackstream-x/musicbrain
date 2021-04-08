@@ -26,12 +26,31 @@ import audio_metadata
 # Constants
 #
 
-SCRIPT_NAME = 'Rename by Sides GUI'
-VERSION = '0.1.0'
-HOMEPAGE = 'https://github.com/blackstream-x/musicbrain'
-LICENSE = 'LICENSE'
 
+SCRIPT_NAME = 'Rename by Sides GUI'
+HOMEPAGE = 'https://github.com/blackstream-x/musicbrain'
 MAIN_WINDOW_TITLE = 'Musicbrain: Rename tracks according to media sides'
+
+SCRIPT_PATH = pathlib.Path(sys.argv[0])
+# Follow symlinks
+if SCRIPT_PATH.is_symlink():
+    SCRIPT_PATH = SCRIPT_PATH.readlink()
+#
+
+LICENSE_PATH = SCRIPT_PATH.parent / 'LICENSE'
+try:
+    LICENSE_TEXT = LICENSE_PATH.read_text()
+except OSError as error:
+    LICENSE_TEXT = '(License file is missing: %s)' % error
+#
+
+VERSION_PATH = SCRIPT_PATH.parent / 'version.txt'
+try:
+    VERSION = VERSION_PATH.read_text().strip()
+except OSError as error:
+    VERSION = '(Version file is missing: %s)' % error
+#
+
 
 #
 # Classes
@@ -490,23 +509,12 @@ class UserInterface():
         """Show information about the application
         in a modal dialog
         """
-        script_path = pathlib.Path(sys.argv[0])
-        # Follow symlinks
-        if script_path.is_symlink():
-            script_path = script_path.readlink()
-        #
-        license_path = script_path.parent / LICENSE
-        try:
-            license_text = license_path.read_text()
-        except OSError as error:
-            license_text = '(License file is missing: %s)' % error
-        #
         InfoDialog(
             self.main_window,
             (SCRIPT_NAME,
              'Version: {0}\nProject homepage: {1}'.format(
                 VERSION, HOMEPAGE)),
-            ('License:', license_text),
+            ('License:', LICENSE_TEXT),
             title='About…')
         #
 
