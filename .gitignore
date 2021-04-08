@@ -21,3 +21,4 @@ build.txt
 # local test data
 testdata/
 
+gui_template.py
