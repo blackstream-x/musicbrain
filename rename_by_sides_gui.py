@@ -203,7 +203,7 @@ class UserInterface():
         self.main_window = tkinter.Tk()
         self.main_window.title(MAIN_WINDOW_TITLE)
         description_text = (
-            'Use the slider to set the numer of tracks'
+            'Use the slider to set the number of tracks'
             ' on the first side of the selected medium.')
         description_frame = tkinter.Frame(
             self.main_window,
