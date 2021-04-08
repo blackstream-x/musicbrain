@@ -146,17 +146,13 @@ class Track(SortableHashableMixin):
         self.file_path = file_path
         self.length = length
         self.medium_number = None
+        self.sided_number = None
         self.track_number = None
         self.total_tracks = None
         self.__tags = {}
         self.__set_tags(**tags_map)
         self.__tags_changed = tags_changed
-        special_numbering = self.prx_special_number.match(file_path.name)
-        if special_numbering:
-            self.sided_number = special_numbering.group(1)
-        else:
-            self.sided_number = None
-        #
+        self.reset_sided_number()
 
     @classmethod
     def from_path(cls, file_path):
@@ -231,6 +227,16 @@ class Track(SortableHashableMixin):
             return self.fs_unsided_prefix.format(self)
         #
         return ''
+
+    def reset_sided_number(self):
+        """Determine and set the sided number from the file name"""
+        special_numbering = self.prx_special_number.match(
+            self.file_path.name)
+        if special_numbering:
+            self.sided_number = special_numbering.group(1)
+        else:
+            self.sided_number = None
+        #
 
     def save_tags(self, simulation=False):
         """Save the tags to the file and
@@ -530,7 +536,7 @@ class SidedMedium(Medium):
                          declared_total_tracks=declared_total_tracks)
         self.tracks_map = {}
         self.errors = {}
-        self.both_sides = None
+        self.sides = None
         self.__duplicate_tracks = set()
 
     @classmethod
@@ -623,6 +629,12 @@ class SidedMedium(Medium):
         #
         return (first_side_name, second_side_name)
 
+    def reset_sided_numbers(self):
+        """Reset sided numbers on all tracks"""
+        for track in self.all_tracks:
+            track.reset_sided_number()
+        #
+
     def determine_errors(self):
         """Find errors and write them to the errors dict"""
         self.errors = {}
@@ -661,6 +673,7 @@ class SidedMedium(Medium):
         """Analyze the tracklist and return a BothSides instance.
         Requires all tracks to have a proper track number.
         """
+        self.reset_sided_numbers()
         self.determine_errors()
         detected_sides = []
         current_side = None
@@ -755,7 +768,7 @@ class SidedMedium(Medium):
             raise ValueError(self.error_string)
         #
         # Store the both_sides attribute
-        self.both_sides = both_sides
+        self.sides = both_sides
         self.apply_sided_numbering()
 
     def accumulated_track_lengths(self, side):
@@ -764,7 +777,7 @@ class SidedMedium(Medium):
         """
         side_duration = 0
         for track in self.__tracks_by_list(
-                self.both_sides[side].allowed_track_numbers):
+                self.sides[side].allowed_track_numbers):
             side_duration += track.length
         #
         return side_duration
@@ -772,7 +785,7 @@ class SidedMedium(Medium):
     def apply_sided_numbering(self):
         """Apply sided numbering"""
         for side in (0, 1):
-            current_side = self.both_sides[side]
+            current_side = self.sides[side]
             for track_number in current_side.allowed_track_numbers:
                 self.tracks_map[track_number].sided_number = \
                     current_side.get_sided_number(track_number)
@@ -783,7 +796,7 @@ class SidedMedium(Medium):
         """Return the tracks as a single string"""
         return '\n'.join(
             fmt.format(track) for track in self.__tracks_by_list(
-                self.both_sides[side].allowed_track_numbers))
+                self.sides[side].allowed_track_numbers))
 
     def __str__(self):
         """Return a string representation"""
