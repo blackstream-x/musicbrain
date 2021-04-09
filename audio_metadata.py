@@ -394,6 +394,15 @@ class Medium(SortableHashableMixin):
         """Return the tracks as a sorted list"""
         return sorted(self.all_tracks)
 
+    @property
+    def total_length(self):
+        """return the total length of all tracks on the medium"""
+        total_duration = 0
+        for track in self.tracks_list:
+            total_duration += track.length
+        #
+        return total_duration
+
     def add_track(self, track):
         """Add the track to the tracklist"""
         if track in self.all_tracks:

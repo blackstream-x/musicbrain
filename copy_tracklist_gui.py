@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-rename_by_sides_gui.py
+copy_tracklist_gui.py
 
-Rename tracks according to media sides
+Copy a tracklist to the clipboard
 
 """
 
@@ -27,9 +27,9 @@ import audio_metadata
 #
 
 
-SCRIPT_NAME = 'Rename by Sides GUI'
+SCRIPT_NAME = 'Copy tracklist GUI'
 HOMEPAGE = 'https://github.com/blackstream-x/musicbrain'
-MAIN_WINDOW_TITLE = 'Musicbrain: Rename tracks according to media sides'
+MAIN_WINDOW_TITLE = 'Musicbrain: Copy tracklist'
 
 SCRIPT_PATH = pathlib.Path(sys.argv[0])
 # Follow symlinks
@@ -57,25 +57,6 @@ except OSError as error:
 #
 
 
-class SideDataSnapshot:
-
-    """Hold a snapshot of side data"""
-
-    def __init__(self):
-        """Allocate variables"""
-        self.name = tkinter.StringVar()
-        self.length = tkinter.StringVar()
-        self.tracks = tkinter.StringVar()
-
-    def update_from_side(self, sided_medium, side_index):
-        """Set variables from the medium side"""
-        self.name.set(sided_medium.sides[side_index].name)
-        self.length.set(
-            '(side length: %02d:%02d)' % divmod(
-                sided_medium.accumulated_track_lengths(side_index), 60))
-        self.tracks.set(sided_medium.tracks_on_side(side_index))
-
-
 class ReleaseData:
 
     """Hold release data"""
@@ -84,14 +65,11 @@ class ReleaseData:
         """Allocate variables"""
         self.album = tkinter.StringVar()
         self.albumartist = tkinter.StringVar()
-        self.medium_numbers = ()
 
     def update_from_release(self, release):
         """Set variables from the release"""
         self.album.set(release.album)
         self.albumartist.set(release.albumartist)
-        self.medium_numbers = tuple(
-            str(number) for number in release.medium_numbers)
 
 
 class ModalDialog(tkinter.Toplevel):
@@ -259,8 +237,8 @@ class UserInterface():
         self.main_window = tkinter.Tk()
         self.main_window.title(MAIN_WINDOW_TITLE)
         description_text = (
-            'Use the slider to set the number of tracks'
-            ' on the first side of the selected medium.')
+            'Use the "Copy tracklist" button(s) to copy the'
+            ' tracks list of a medium to the clipboard.')
         description_frame = tkinter.Frame(
             self.main_window,
             borderwidth=2,
@@ -279,15 +257,10 @@ class UserInterface():
         #
         self.release = None
         self.release_data = ReleaseData()
-        self.medium_number = None
-        self.tracks_slider = None
-        self.first_side_tracks = None
-        self.current_medium_number = None
-        self.sided_medium = None
-        self.side_data = [SideDataSnapshot(), SideDataSnapshot()]
         self.action_frame = None
         self.__add_action_frame()
         self.directory_path = directory_path
+        self.media_area = None
         self.choose_release(
             keep_existing=True,
             quit_on_empty_choice=True)
@@ -341,77 +314,6 @@ class UserInterface():
             columnspan=3,
             padx=4,
             sticky=tkinter.W)
-        medium_label = tkinter.Label(
-            self.action_frame,
-            text='Medium number:',
-            justify=tkinter.LEFT)
-        medium_label.grid(
-            row=2,
-            column=0,
-            padx=4,
-            sticky=tkinter.E)
-        slider_label = tkinter.Label(
-            self.action_frame,
-            text='Number of tracks on the first side:')
-        slider_label.grid(
-            row=3,
-            column=0,
-            sticky=tkinter.E)
-        slider_reset_button = tkinter.Button(
-            self.action_frame,
-            command=self.guess_sides,
-            text='Reset to optimum value')
-        slider_reset_button.grid(
-            row=4,
-            column=0,
-            sticky=tkinter.E)
-        for side_index in (0, 1):
-            side_frame = tkinter.Frame(
-                self.action_frame,
-                borderwidth=2,
-                padx=5,
-                pady=5,
-                relief=tkinter.GROOVE)
-            # side_frame.columnconfigure(0, weight=1)
-            side_frame.columnconfigure(1, weight=1)
-            side_name_entry = tkinter.Entry(
-                side_frame,
-                textvariable=self.side_data[side_index].name,
-                width=4,
-                justify=tkinter.LEFT)
-            side_name_entry.grid(
-                row=0,
-                column=0,
-                padx=4,
-                sticky=tkinter.W)
-            side_name_entry.bind(
-                '<KeyRelease>',
-                self.set_sides_event_wrapper)
-            side_length = tkinter.Label(
-                side_frame,
-                textvariable=self.side_data[side_index].length,
-                justify=tkinter.LEFT)
-            side_length.grid(
-                row=0,
-                column=1,
-                padx=4,
-                sticky=tkinter.W)
-            side_tracks = tkinter.Label(
-                side_frame,
-                textvariable=self.side_data[side_index].tracks,
-                justify=tkinter.LEFT)
-            side_tracks.grid(
-                row=1,
-                column=0,
-                columnspan=2,
-                padx=4,
-                sticky=tkinter.W + tkinter.N)
-            side_frame.grid(
-                row=5,
-                column=2 * side_index,
-                columnspan=3,
-                sticky=tkinter.N + tkinter.W + tkinter.E + tkinter.S)
-        #
         self.action_frame.grid(
             padx=4,
             pady=2,
@@ -426,17 +328,6 @@ class UserInterface():
             padx=5,
             pady=5,
             relief=tkinter.GROOVE)
-        apply_button = tkinter.Button(
-            buttonarea,
-            text='Apply changes…',
-            command=self.apply_changes,
-            default=tkinter.ACTIVE)
-        apply_button.grid(
-            row=0,
-            column=0,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
         choose_button = tkinter.Button(
             buttonarea,
             text='Choose another release…',
@@ -510,23 +401,42 @@ class UserInterface():
                 continue
             #
             self.release_data.update_from_release(self.release)
-            if self.medium_number:
-                self.medium_number.grid_forget()
+            if self.media_area:
+                self.media_area.grid_forget()
             #
-            self.medium_number = tkinter.Spinbox(
+            self.media_area =  tkinter.Frame(
                 self.action_frame,
-                command=self.read_medium,
-                state='readonly',
-                width=2,
-                values=self.release_data.medium_numbers)
-            self.medium_number.grid(
+                padx=5,
+                pady=5)
+            for (row_number, medium_number) in enumerate(
+                    self.release.medium_numbers):
+                def copy_tracklist_handler(self=self,
+                                           number=medium_number):
+                    """Internal function definition to process the medium
+                    number in the "real" handler function,
+                    compare <https://tkdocs.com/shipman/extra-args.html>.
+                    """
+                    return self.copy_tracklist(medium_number=number)
+                #
+                medium = self.release[medium_number]
+                medium_length = '%02d:%02d' % divmod(medium.total_length, 60)
+                button = tkinter.Button(
+                    self.media_area,
+                    text='Copy tracklist of medium #%s (%s tracks,'
+                    ' total length: %s)' % (
+                        medium_number,
+                        medium.counted_tracks,
+                        medium_length),
+                    command=copy_tracklist_handler)
+                button.grid(
+                    row=row_number,
+                    column=0,
+                    sticky=tkinter.W)
+            self.media_area.grid(
                 row=2,
-                column=1,
-                columnspan=3,
-                padx=4,
+                column=0,
+                columnspan=4,
                 sticky=tkinter.W)
-            self.current_medium_number = None
-            self.read_medium()
             break
         #
 
@@ -534,108 +444,6 @@ class UserInterface():
         """Set self.release by reading self.directory_path"""
         self.release = audio_metadata.get_release_from_path(
             self.directory_path)
-
-    def read_medium(self):
-        """Read the value from the self.medium_number spinbox,
-        set the active medium, get its data
-        (side names, tracks distribution, toal length),
-        redraw the slider,
-        and update the displayed fields
-        """
-        selected_medium_number = int(self.medium_number.get())
-        if selected_medium_number == self.current_medium_number:
-            return
-        #
-        previous_sided_medium = self.sided_medium
-        self.sided_medium = audio_metadata.SidedMedium.from_medium(
-            self.release[selected_medium_number])
-        try:
-            self.sided_medium.set_sides()
-        except ValueError as error:
-            messagebox.showerror(
-                'Error while setting sides',
-                str(error),
-                icon=messagebox.ERROR)
-            self.sided_medium = previous_sided_medium
-            return
-        #
-        self.current_medium_number = selected_medium_number
-        self.first_side_tracks = tkinter.IntVar()
-        self.first_side_tracks.set(
-            self.sided_medium.sides[0].number_of_tracks)
-        if self.tracks_slider:
-            self.tracks_slider.grid_forget()
-        #
-        self.tracks_slider = tkinter.Scale(
-            self.action_frame,
-            command=self.set_sides,
-            from_=0,
-            to=self.sided_medium.effective_total_tracks,
-            length=400,
-            orient=tkinter.HORIZONTAL,
-            variable=self.first_side_tracks)
-        self.tracks_slider.grid(
-            column=1,
-            columnspan=3,
-            row=3,
-            rowspan=2,
-            sticky=tkinter.W)
-        self.update_sides_display()
-
-    def update_sides_display(self):
-        """Read active medium data
-        (side names, tracks distribution, toal length),
-        and update the displayed fields
-        """
-        for side_index in (0, 1):
-            self.side_data[side_index].update_from_side(
-                self.sided_medium,
-                side_index)
-        #
-
-    def set_sides(self, first_side_tracks=None):
-        """Read active medium data
-        (side names, tracks distribution, toal length),
-        and update the displayed fields
-        """
-        if not first_side_tracks:
-            first_side_tracks = self.first_side_tracks.get()
-        #
-        side_names = [
-            self.side_data[side_index].name.get()
-            for side_index in (0, 1)]
-        if side_names[0] and side_names[0] == side_names[1]:
-            raise ValueError('The two sides must have different Names!')
-        #
-        self.sided_medium.set_sides(
-            *side_names,
-            first_side_tracks=int(first_side_tracks))
-        self.update_sides_display()
-
-    def set_sides_event_wrapper(self, event=None):
-        """Event wrapper for self.set_sides()"""
-        del event
-        try:
-            self.set_sides()
-        except ValueError as error:
-            messagebox.showerror(
-                'Error while setting sides',
-                str(error),
-                icon=messagebox.ERROR)
-        #
-
-    def guess_sides(self):
-        """Guess sides by length"""
-        both_sides = self.sided_medium.guess_sides()
-        self.first_side_tracks.set(both_sides[0].number_of_tracks)
-        try:
-            self.set_sides()
-        except ValueError as error:
-            messagebox.showerror(
-                'Error while setting sides',
-                str(error),
-                icon=messagebox.ERROR)
-        #
 
     def show_about(self):
         """Show information about the application
@@ -650,39 +458,23 @@ class UserInterface():
             title='About…')
         #
 
-    def apply_changes(self):
-        """Apply changes  after showing a confirmation dialog"""
-        self.set_sides()
-        if not all(self.side_data[side_index].name.get()
-                   for side_index in (0, 1)):
-            messagebox.showerror(
-                'Missing side name(s)',
-                'Both sides must have a name!',
-                icon=messagebox.ERROR)
+    def copy_tracklist(self, medium_number=None):
+        """Copy the tracklist and show it in a confirmation dialog"""
+        if not medium_number:
             return
         #
-        renamings = []
-        for track in self.sided_medium.tracks_list:
-            old_name = track.file_path.name
-            new_name = track.suggested_filename()
-            if new_name != old_name:
-                renamings.append((track.file_path, new_name))
-            #
+        medium = self.release[medium_number]
+        tracklist = medium.tracks_as_text()
+        if tracklist:
+            self.main_window.clipboard_clear()
+            self.main_window.clipboard_append(tracklist)
         #
-        if renamings:
-            ConfirmRenameDialog(
-                self.main_window,
-                renamings)
-            # Refresh release and medium information
-            self.read_release()
-            self.read_medium()
-        else:
-            messagebox.showinfo(
-                'No renaming necessary',
-                'All tracks already have the desired name.',
-                icon=messagebox.INFO)
+        InfoDialog(
+            self.main_window,
+            ('Copied the following tracklist to the clipboard:',
+             tracklist),
+            title='Copied track of medium #%s' % medium_number)
         #
-
 
     def quit(self, event=None):
         """Exit the application"""
