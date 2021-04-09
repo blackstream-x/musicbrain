@@ -1,6 +1,6 @@
 # musicbrain
 
-Scripts for audio files metadata access
+__Scripts for audio files metadata access__
 
 The GUI scripts support Nautilus (GNOME desktop file manager) integration
 by putting a symbolic link into the ```~/.local/share/nautilus/scripts/```
@@ -9,7 +9,9 @@ directory.
 ## Requirements
 
 The scripts in this project require the musicbrainzngs
-and pytaglib python packages, see [](./requirements.txt>).
+and pytaglib python packages, see [requirements.txt](./requirements.txt>).
+
+## The scripts
 
 ### Copy tracklist (copy_tracklist_gui.py)
 
