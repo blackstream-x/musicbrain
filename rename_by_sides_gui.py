@@ -57,6 +57,43 @@ except OSError as error:
 #
 
 
+class SideDataSnapshot:
+
+    """Hold a snapshot of side data"""
+
+    def __init__(self):
+        """Allocate variables"""
+        self.name = tkinter.StringVar()
+        self.length = tkinter.StringVar()
+        self.tracks = tkinter.StringVar()
+
+    def update_from_side(self, sided_medium, side_index):
+        """Set variables from the medium side"""
+        self.name.set(sided_medium.sides[side_index].name)
+        self.length.set(
+            '(side length: %02d:%02d)' % divmod(
+                sided_medium.accumulated_track_lengths(side_index), 60))
+        self.tracks.set(sided_medium.tracks_on_side(side_index))
+
+
+class ReleaseData:
+
+    """Hold release data"""
+
+    def __init__(self):
+        """Allocate variables"""
+        self.album = tkinter.StringVar()
+        self.albumartist = tkinter.StringVar()
+        self.medium_numbers = ()
+
+    def update_from_release(self, release):
+        """Set variables from the release"""
+        self.album.set(release.album)
+        self.albumartist.set(release.albumartist)
+        self.medium_numbers = tuple(
+            str(number) for number in release.medium_numbers)
+
+
 class ModalDialog(tkinter.Toplevel):
 
     """Adapted from
@@ -240,87 +277,85 @@ class UserInterface():
             pady=2,
             sticky=tkinter.E + tkinter.W)
         #
+        self.release = None
+        self.release_data = ReleaseData()
+        self.medium_number = None
+        self.tracks_slider = None
+        self.first_side_tracks = None
+        self.current_medium_number = None
+        self.sided_medium = None
+        self.side_data = [SideDataSnapshot(), SideDataSnapshot()]
+        self.action_frame = None
+        self.__add_action_frame()
+        self.directory_path = directory_path
+        self.choose_release(
+            keep_existing=True,
+            quit_on_empty_choice=True)
+        self.__add_buttonarea()
+        self.main_window.mainloop()
+
+    def __add_action_frame(self):
+        """Add the action area"""
         self.action_frame = tkinter.Frame(
             self.main_window,
             borderwidth=2,
             padx=5,
             pady=5,
             relief=tkinter.GROOVE)
-        if not directory_path:
-            selected_directory = filedialog.askdirectory()
-            directory_path = pathlib.Path(selected_directory)
-        #
-        self.directory_path = directory_path
-        self.release = None
-        self.read_release()
+        # self.read_release()
         release_label = tkinter.Label(
             self.action_frame,
             text='Release:',
             justify=tkinter.LEFT)
-        release_value = tkinter.Label(
-            self.action_frame,
-            text=self.release.album,
-            justify=tkinter.LEFT)
         release_label.grid(
             row=0,
             column=0,
-            columnspan=2,
             padx=4,
             sticky=tkinter.E)
+        release_value = tkinter.Label(
+            self.action_frame,
+            textvariable=self.release_data.album,
+            justify=tkinter.LEFT)
         release_value.grid(
             row=0,
-            column=2,
-            columnspan=4,
+            column=1,
+            columnspan=3,
             padx=4,
             sticky=tkinter.W)
         artist_label = tkinter.Label(
             self.action_frame,
             text='by Artist:',
             justify=tkinter.LEFT)
-        artist_value = tkinter.Label(
-            self.action_frame,
-            text=self.release.albumartist,
-            justify=tkinter.LEFT)
         artist_label.grid(
             row=1,
             column=0,
-            columnspan=2,
             padx=4,
             sticky=tkinter.E)
+        artist_value = tkinter.Label(
+            self.action_frame,
+            textvariable=self.release_data.albumartist,
+            justify=tkinter.LEFT)
         artist_value.grid(
             row=1,
-            column=2,
-            columnspan=4,
+            column=1,
+            columnspan=3,
             padx=4,
             sticky=tkinter.W)
         medium_label = tkinter.Label(
             self.action_frame,
             text='Medium number:',
             justify=tkinter.LEFT)
-        self.medium_number = tkinter.Spinbox(
-            self.action_frame,
-            command=self.read_medium,
-            state='readonly',
-            values=tuple(
-                str(number) for number in self.release.medium_numbers))
         medium_label.grid(
             row=2,
             column=0,
-            columnspan=2,
             padx=4,
             sticky=tkinter.E)
-        self.medium_number.grid(
-            row=2,
-            column=2,
-            padx=4,
-            sticky=tkinter.W)
         slider_label = tkinter.Label(
             self.action_frame,
             text='Number of tracks on the first side:')
         slider_label.grid(
             row=3,
             column=0,
-            columnspan=3,
             sticky=tkinter.E)
         slider_reset_button = tkinter.Button(
             self.action_frame,
@@ -329,93 +364,168 @@ class UserInterface():
         slider_reset_button.grid(
             row=4,
             column=0,
-            columnspan=3,
             sticky=tkinter.E)
-        self.tracks_slider = None
-        self.first_side_tracks = None
-        self.side_names = [tkinter.StringVar(), tkinter.StringVar()]
-        self.side_lengths = [tkinter.StringVar(), tkinter.StringVar()]
-        self.side_tracks = [tkinter.StringVar(), tkinter.StringVar()]
         for side_index in (0, 1):
-            side_label = tkinter.Label(
+            side_frame = tkinter.Frame(
                 self.action_frame,
-                text='Side ',
-                justify=tkinter.LEFT)
-            side_label.grid(
-                row=5,
-                column=3 * side_index,
-                padx=4,
-                sticky=tkinter.E)
+                borderwidth=2,
+                padx=5,
+                pady=5,
+                relief=tkinter.GROOVE)
+            # side_frame.columnconfigure(0, weight=1)
+            side_frame.columnconfigure(1, weight=1)
             side_name_entry = tkinter.Entry(
-                self.action_frame,
-                textvariable=self.side_names[side_index],
+                side_frame,
+                textvariable=self.side_data[side_index].name,
                 width=4,
                 justify=tkinter.LEFT)
             side_name_entry.grid(
-                row=5,
-                column=3 * side_index + 1,
+                row=0,
+                column=0,
                 padx=4,
                 sticky=tkinter.W)
-            side_name_entry.bind('<KeyRelease>', self.set_sides_event_wrapper)
+            side_name_entry.bind(
+                '<KeyRelease>',
+                self.set_sides_event_wrapper)
             side_length = tkinter.Label(
-                self.action_frame,
-                textvariable=self.side_lengths[side_index],
+                side_frame,
+                textvariable=self.side_data[side_index].length,
                 justify=tkinter.LEFT)
             side_length.grid(
-                row=5,
-                column=3 * side_index + 2,
+                row=0,
+                column=1,
                 padx=4,
                 sticky=tkinter.W)
             side_tracks = tkinter.Label(
-                self.action_frame,
-                textvariable=self.side_tracks[side_index],
+                side_frame,
+                textvariable=self.side_data[side_index].tracks,
                 justify=tkinter.LEFT)
             side_tracks.grid(
-                row=6,
-                column=3 * side_index,
-                columnspan=3,
+                row=1,
+                column=0,
+                columnspan=2,
                 padx=4,
                 sticky=tkinter.W + tkinter.N)
-        #
-        self.read_medium()
-        button = tkinter.Button(
-            self.action_frame,
-            text='Apply changes',
-            command=self.apply_changes,
-            default=tkinter.ACTIVE)
-        button.grid(
-            row=7,
-            column=0,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
-        button = tkinter.Button(
-            self.action_frame,
-            text='About…',
-            command=self.show_about)
-        button.grid(
-            row=7,
-            column=2,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
-        button = tkinter.Button(
-            self.action_frame,
-            text='Quit',
-            command=self.quit)
-        button.grid(
-            row=7,
-            column=5,
-            sticky=tkinter.E,
-            padx=5,
-            pady=5)
+            side_frame.grid(
+                row=5,
+                column=2 * side_index,
+                columnspan=3,
+                sticky=tkinter.N + tkinter.W + tkinter.E + tkinter.S)
         #
         self.action_frame.grid(
             padx=4,
             pady=2,
             sticky=tkinter.E + tkinter.W)
         #
-        self.main_window.mainloop()
+
+    def __add_buttonarea(self):
+        """Add the …, "About" and "Quit" buttons"""
+        buttonarea = tkinter.Frame(
+            self.main_window,
+            borderwidth=2,
+            padx=5,
+            pady=5,
+            relief=tkinter.GROOVE)
+        apply_button = tkinter.Button(
+            buttonarea,
+            text='Apply changes…',
+            command=self.apply_changes,
+            default=tkinter.ACTIVE)
+        apply_button.grid(
+            row=0,
+            column=0,
+            sticky=tkinter.W,
+            padx=5,
+            pady=5)
+        choose_button = tkinter.Button(
+            buttonarea,
+            text='Choose another release…',
+            command=self.choose_release,
+            default=tkinter.ACTIVE)
+        choose_button.grid(
+            row=0,
+            column=1,
+            sticky=tkinter.W,
+            padx=5,
+            pady=5)
+        about_button = tkinter.Button(
+            buttonarea,
+            text='About…',
+            command=self.show_about)
+        about_button.grid(
+            row=0,
+            column=2,
+            sticky=tkinter.E,
+            padx=5,
+            pady=5)
+        quit_button = tkinter.Button(
+            buttonarea,
+            text='Quit',
+            command=self.quit)
+        quit_button.grid(
+            row=0,
+            column=3,
+            sticky=tkinter.E,
+            padx=5,
+            pady=5)
+        #
+        buttonarea.grid(
+            padx=4,
+            pady=2,
+            sticky=tkinter.E + tkinter.W)
+        #
+
+    def choose_release(self,
+                       keep_existing=False,
+                       preset_path=None,
+                       quit_on_empty_choice=False):
+        """Choose a release via file dialog"""
+        if preset_path:
+            if not preset_path.is_dir():
+                preset_path = preset_path.parent
+            #
+        else:
+            preset_path = self.directory_path
+        #
+        while True:
+            if not keep_existing or self.directory_path is None:
+                selected_directory = filedialog.askdirectory(
+                    initialdir=str(preset_path) or os.getcwd())
+                if not selected_directory:
+                    if quit_on_empty_choice:
+                        self.quit()
+                    #
+                    return
+                #
+                self.directory_path = pathlib.Path(selected_directory)
+            #
+            try:
+                self.read_release()
+            except ValueError as error:
+                messagebox.showerror(
+                    'Error while reading release',
+                    str(error),
+                    icon=messagebox.ERROR)
+                keep_existing = False
+                continue
+            #
+            self.release_data.update_from_release(self.release)
+            self.medium_number = tkinter.Spinbox(
+                self.action_frame,
+                command=self.read_medium,
+                state='readonly',
+                width=2,
+                values=self.release_data.medium_numbers)
+            self.medium_number.grid(
+                row=2,
+                column=1,
+                columnspan=3,
+                padx=4,
+                sticky=tkinter.W)
+            self.current_medium_number = None
+            self.read_medium()
+            break
+        #
 
     def read_release(self):
         """Set self.release by reading self.directory_path"""
@@ -429,8 +539,13 @@ class UserInterface():
         redraw the slider,
         and update the displayed fields
         """
+        selected_medium_number = int(self.medium_number.get())
+        if selected_medium_number == self.current_medium_number:
+            return
+        #
+        previous_sided_medium = self.sided_medium
         self.sided_medium = audio_metadata.SidedMedium.from_medium(
-            self.release[int(self.medium_number.get())])
+            self.release[selected_medium_number])
         try:
             self.sided_medium.set_sides()
         except ValueError as error:
@@ -438,8 +553,10 @@ class UserInterface():
                 'Error while setting sides',
                 str(error),
                 icon=messagebox.ERROR)
+            self.sided_medium = previous_sided_medium
             return
         #
+        self.current_medium_number = selected_medium_number
         self.first_side_tracks = tkinter.IntVar()
         self.first_side_tracks.set(
             self.sided_medium.sides[0].number_of_tracks)
@@ -451,11 +568,11 @@ class UserInterface():
             command=self.set_sides,
             from_=0,
             to=self.sided_medium.effective_total_tracks,
-            length=300,
+            length=400,
             orient=tkinter.HORIZONTAL,
             variable=self.first_side_tracks)
         self.tracks_slider.grid(
-            column=3,
+            column=1,
             columnspan=3,
             row=3,
             rowspan=2,
@@ -468,14 +585,9 @@ class UserInterface():
         and update the displayed fields
         """
         for side_index in (0, 1):
-            current_side = self.sided_medium.sides[side_index]
-            self.side_names[side_index].set(current_side.name)
-            self.side_lengths[side_index].set(
-                '(%02d:%02d)' % divmod(
-                    self.sided_medium.accumulated_track_lengths(side_index),
-                    60))
-            self.side_tracks[side_index].set(
-                self.sided_medium.tracks_on_side(side_index))
+            self.side_data[side_index].update_from_side(
+                self.sided_medium,
+                side_index)
         #
 
     def set_sides(self, first_side_tracks=None):
@@ -487,8 +599,11 @@ class UserInterface():
             first_side_tracks = self.first_side_tracks.get()
         #
         side_names = [
-            self.side_names[side_index].get()
+            self.side_data[side_index].name.get()
             for side_index in (0, 1)]
+        if side_names[0] and side_names[0] == side_names[1]:
+            raise ValueError('The two sides must have different Names!')
+        #
         self.sided_medium.set_sides(
             *side_names,
             first_side_tracks=int(first_side_tracks))
@@ -497,13 +612,27 @@ class UserInterface():
     def set_sides_event_wrapper(self, event=None):
         """Event wrapper for self.set_sides()"""
         del event
-        self.set_sides()
+        try:
+            self.set_sides()
+        except ValueError as error:
+            messagebox.showerror(
+                'Error while setting sides',
+                str(error),
+                icon=messagebox.ERROR)
+        #
 
     def guess_sides(self):
         """Guess sides by length"""
         both_sides = self.sided_medium.guess_sides()
         self.first_side_tracks.set(both_sides[0].number_of_tracks)
-        self.set_sides()
+        try:
+            self.set_sides()
+        except ValueError as error:
+            messagebox.showerror(
+                'Error while setting sides',
+                str(error),
+                icon=messagebox.ERROR)
+        #
 
     def show_about(self):
         """Show information about the application
@@ -521,6 +650,14 @@ class UserInterface():
     def apply_changes(self):
         """Apply changes  after showing a confirmation dialog"""
         self.set_sides()
+        if not all(self.side_data[side_index].name.get()
+                   for side_index in (0, 1)):
+            messagebox.showerror(
+                'Missing side name(s)',
+                'Both sides must have a name!',
+                icon=messagebox.ERROR)
+            return
+        #
         renamings = []
         for track in self.sided_medium.tracks_list:
             old_name = track.file_path.name

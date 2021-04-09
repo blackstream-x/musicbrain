@@ -25,7 +25,7 @@ import taglib
 # Constants
 #
 
-FS_DISPLAY_TRACK_TITLE = '{0.display_prefix}{0.TITLE}'
+FS_DISPLAY_TRACK_TITLE = '{0.display_prefix}{0.TITLE} ({0.display_duration})'
 FS_DISPLAY_TRACK_FULL = '{0.display_prefix}{0.ARTIST} – {0.TITLE}'
 FS_MUSICBRAINZ_PARSEABLE_TRACK = \
     '{0.display_prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
