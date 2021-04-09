@@ -29,7 +29,7 @@ import audio_metadata
 
 SCRIPT_NAME = 'Copy tracklist GUI'
 HOMEPAGE = 'https://github.com/blackstream-x/musicbrain'
-MAIN_WINDOW_TITLE = 'Musicbrain: Copy tracklist'
+MAIN_WINDOW_TITLE = 'musicbrain: Copy tracklist'
 
 SCRIPT_PATH = pathlib.Path(sys.argv[0])
 # Follow symlinks
@@ -237,8 +237,8 @@ class UserInterface():
         self.main_window = tkinter.Tk()
         self.main_window.title(MAIN_WINDOW_TITLE)
         description_text = (
-            'Use the "Copy tracklist" button(s) to copy the'
-            ' tracks list of a medium to the clipboard.')
+            'Use the "Copy" buttons to copy'
+            ' desired data to the clipboard.')
         description_frame = tkinter.Frame(
             self.main_window,
             borderwidth=2,
@@ -275,43 +275,59 @@ class UserInterface():
             padx=5,
             pady=5,
             relief=tkinter.GROOVE)
-        # self.read_release()
+        self.action_frame.columnconfigure(2, weight=1)
+        button = tkinter.Button(
+            self.action_frame,
+            text='Copy',
+            command=self.copy_album)
+        button.grid(
+            row=0,
+            column=0,
+            padx=4,
+            sticky=tkinter.W)
         release_label = tkinter.Label(
             self.action_frame,
             text='Release:',
             justify=tkinter.LEFT)
         release_label.grid(
             row=0,
-            column=0,
+            column=1,
             padx=4,
-            sticky=tkinter.E)
+            sticky=tkinter.W)
         release_value = tkinter.Label(
             self.action_frame,
             textvariable=self.release_data.album,
             justify=tkinter.LEFT)
         release_value.grid(
             row=0,
-            column=1,
-            columnspan=3,
+            column=2,
+            padx=4,
+            sticky=tkinter.W)
+        button = tkinter.Button(
+            self.action_frame,
+            text='Copy',
+            command=self.copy_artist)
+        button.grid(
+            row=1,
+            column=0,
             padx=4,
             sticky=tkinter.W)
         artist_label = tkinter.Label(
             self.action_frame,
-            text='by Artist:',
+            text='Artist:',
             justify=tkinter.LEFT)
         artist_label.grid(
             row=1,
-            column=0,
+            column=1,
             padx=4,
-            sticky=tkinter.E)
+            sticky=tkinter.W)
         artist_value = tkinter.Label(
             self.action_frame,
             textvariable=self.release_data.albumartist,
             justify=tkinter.LEFT)
         artist_value.grid(
             row=1,
-            column=1,
-            columnspan=3,
+            column=2,
             padx=4,
             sticky=tkinter.W)
         self.action_frame.grid(
@@ -404,10 +420,8 @@ class UserInterface():
             if self.media_area:
                 self.media_area.grid_forget()
             #
-            self.media_area =  tkinter.Frame(
-                self.action_frame,
-                padx=5,
-                pady=5)
+            self.media_area =  tkinter.Frame(self.action_frame)
+            self.media_area.columnconfigure(1, weight=1)
             for (row_number, medium_number) in enumerate(
                     self.release.medium_numbers):
                 def copy_tracklist_handler(self=self,
@@ -422,21 +436,31 @@ class UserInterface():
                 medium_length = '%02d:%02d' % divmod(medium.total_length, 60)
                 button = tkinter.Button(
                     self.media_area,
-                    text='Copy tracklist of medium #%s (%s tracks,'
-                    ' total length: %s)' % (
-                        medium_number,
-                        medium.counted_tracks,
-                        medium_length),
+                    text='Copy',
                     command=copy_tracklist_handler)
                 button.grid(
                     row=row_number,
                     column=0,
+                    padx=4,
+                    sticky=tkinter.W)
+                media_label = tkinter.Label(
+                    self.media_area,
+                    text='tracklist of medium #%s (%s tracks,'
+                    ' total length: %s)' % (
+                        medium_number,
+                        medium.counted_tracks,
+                        medium_length),
+                    justify=tkinter.LEFT)
+                media_label.grid(
+                    row=row_number,
+                    column=1,
+                    padx=4,
                     sticky=tkinter.W)
             self.media_area.grid(
                 row=2,
                 column=0,
-                columnspan=4,
-                sticky=tkinter.W)
+                columnspan=3,
+                sticky=tkinter.E + tkinter.W)
             break
         #
 
@@ -473,7 +497,33 @@ class UserInterface():
             self.main_window,
             ('Copied the following tracklist to the clipboard:',
              tracklist),
-            title='Copied track of medium #%s' % medium_number)
+            title='Copied tracklist of medium #%s' % medium_number)
+        #
+
+    def copy_album(self):
+        """Copy the release name and show it in a confirmation dialog"""
+        requested_data = self.release_data.album.get()
+        self.main_window.clipboard_clear()
+        self.main_window.clipboard_append(requested_data)
+        #
+        InfoDialog(
+            self.main_window,
+            ('Copied the following release name to the clipboard:',
+             requested_data),
+            title='Copied release name')
+        #
+
+    def copy_artist(self):
+        """Copy the artist name and show it in a confirmation dialog"""
+        requested_data = self.release_data.albumartist.get()
+        self.main_window.clipboard_clear()
+        self.main_window.clipboard_append(requested_data)
+        #
+        InfoDialog(
+            self.main_window,
+            ('Copied the following artist name to the clipboard:',
+             requested_data),
+            title='Copied release artist')
         #
 
     def quit(self, event=None):

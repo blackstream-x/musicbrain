@@ -29,7 +29,7 @@ import audio_metadata
 
 SCRIPT_NAME = 'Rename by Sides GUI'
 HOMEPAGE = 'https://github.com/blackstream-x/musicbrain'
-MAIN_WINDOW_TITLE = 'Musicbrain: Rename tracks according to media sides'
+MAIN_WINDOW_TITLE = 'musicbrain: Rename tracks according to media sides'
 
 SCRIPT_PATH = pathlib.Path(sys.argv[0])
 # Follow symlinks
@@ -360,7 +360,7 @@ class UserInterface():
         slider_reset_button = tkinter.Button(
             self.action_frame,
             command=self.guess_sides,
-            text='Reset to optimum value')
+            text='Set to optimum value')
         slider_reset_button.grid(
             row=4,
             column=0,
