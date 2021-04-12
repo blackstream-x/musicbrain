@@ -420,7 +420,7 @@ class UserInterface():
             if self.media_area:
                 self.media_area.grid_forget()
             #
-            self.media_area =  tkinter.Frame(self.action_frame)
+            self.media_area = tkinter.Frame(self.action_frame)
             self.media_area.columnconfigure(1, weight=1)
             for (row_number, medium_number) in enumerate(
                     self.release.medium_numbers):

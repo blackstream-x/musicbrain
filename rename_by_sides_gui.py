@@ -683,7 +683,6 @@ class UserInterface():
                 icon=messagebox.INFO)
         #
 
-
     def quit(self, event=None):
         """Exit the application"""
         del event
