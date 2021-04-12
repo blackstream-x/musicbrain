@@ -25,11 +25,11 @@ import taglib
 # Constants
 #
 
-FS_DISPLAY_TRACK_TITLE = '{0.display_prefix}{0.TITLE} ({0.display_duration})'
-FS_DISPLAY_TRACK_FULL = '{0.display_prefix}{0.ARTIST} – {0.TITLE}'
+FS_DISPLAY_TRACK_TITLE = '{0.prefix}{0.TITLE} ({0.display_duration})'
+FS_DISPLAY_TRACK_FORWARD = \
+    '{0.prefix}{0.ARTIST} – {0.TITLE} ({0.display_duration})'
 FS_MUSICBRAINZ_PARSEABLE_TRACK = \
-    '{0.display_prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
-FS_SUGGESTED_FILE_NAME = '{0.file_prefix}{0.ARTIST} - {0.TITLE}'
+    '{0.prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
 
 PRX_INVALID_FILENAME = re.compile(r'["\*/:;<>\?\\\|]')
 PRX_KEYWORD = re.compile(r'\A[a-z]+\Z', re.I)
@@ -127,13 +127,64 @@ class SortableHashableMixin:
         return repr(str(self))
 
 
+class SidedTrackPosition(SortableHashableMixin):
+
+    """Object storing the position (e.g. A1 or B3)
+    of an audio track on a sided medium
+    """
+
+    prx_position = re.compile(r'\A([^\d]+)(?:(\d+))?\Z')
+    prx_filename_with_medium = re.compile(r'\A[cdm]\d+([^t\d\s]\S*?)\.\s')
+    prx_filename = re.compile(r'\A([^\d\s]+\d*)\.\s')
+
+    def __init__(self, position):
+        """Allocate internal variables"""
+        self.__position = position
+        position_match = self.prx_position.match(position)
+        if position_match:
+            self.__side_name = position_match.group(1)
+            if position_match.group(2):
+                self.__number = int(position_match.group(2), 10)
+            else:
+                self.__number = 1
+            #
+        else:
+            raise ValueError('Invalid position %r!' % position)
+        #
+
+    @classmethod
+    def from_file_name(cls, file_name):
+        """Return a new SidedTrackPosition from a given file name"""
+        position_match = cls.prx_filename_with_medium.match(file_name)
+        if not position_match:
+            position_match = cls.prx_filename(file_name)
+        #
+        if not position_match:
+            raise ValueError(
+                'No sided position recognized in %r!' % file_name)
+        #
+        return cls(position_match.group(1))
+
+    @property
+    def number(self):
+        """number property"""
+        return self.__number
+
+    @property
+    def side_name(self):
+        """side_name property"""
+        return self.__side_name
+
+    def __str__(self):
+        """String representation"""
+        return self.__position
+
+
 class Track(SortableHashableMixin):
 
     """Object exposing an audio track's metadata"""
 
-    fs_sided_prefix = 'd{0.medium_number}{0.sided_number}. '
     fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
-    prx_special_number = re.compile(r'\Ad\d+([^t\d].*?)\.\s')
     prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
     managed_tags = {
         'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
@@ -146,13 +197,13 @@ class Track(SortableHashableMixin):
         self.file_path = file_path
         self.length = length
         self.medium_number = None
-        self.sided_number = None
+        self.sided_position = None
         self.track_number = None
         self.total_tracks = None
         self.__tags = {}
         self.__set_tags(**tags_map)
         self.__tags_changed = tags_changed
-        self.reset_sided_number()
+        self.reset_sided_position()
 
     @classmethod
     def from_path(cls, file_path):
@@ -207,35 +258,23 @@ class Track(SortableHashableMixin):
         return '%02d:%02d' % divmod(self.length, 60)
 
     @property
-    def display_prefix(self):
-        """Return the prefix for display purposes"""
-        if self.sided_number:
-            return '%s. ' % self.sided_number
+    def prefix(self):
+        """Return the prefix (sided position or track number)"""
+        if self.sided_position:
+            return '%s. ' % self.sided_position
         #
         if self.track_number:
             return '%02d. ' % self.track_number
         #
         return ''
 
-    @property
-    def file_prefix(self):
-        """Return the prefix for file names"""
-        if self.sided_number:
-            return self.fs_sided_prefix.format(self)
-        #
-        if self.track_number:
-            return self.fs_unsided_prefix.format(self)
-        #
-        return ''
-
-    def reset_sided_number(self):
-        """Determine and set the sided number from the file name"""
-        special_numbering = self.prx_special_number.match(
-            self.file_path.name)
-        if special_numbering:
-            self.sided_number = special_numbering.group(1)
-        else:
-            self.sided_number = None
+    def reset_sided_position(self):
+        """Determine and set the sided position from the file name"""
+        try:
+            self.sided_position = SidedTrackPosition.from_file_name(
+                self.file_path.name)
+        except ValueError:
+            self.sided_position = None
         #
 
     def save_tags(self, simulation=False):
@@ -268,14 +307,32 @@ class Track(SortableHashableMixin):
         #
         return changes
 
-    def suggested_filename(self, fmt=FS_SUGGESTED_FILE_NAME):
+    def suggested_filename(self,
+                           include_artist_name=True,
+                           include_medium_number=True):
         """Return a file name suggested from the tags,
         defused using the PRX_INVALID_FILENAME regular expression
         """
-        stem = PRX_INVALID_FILENAME.sub(
-            SAFE_REPLACEMENT,
-            fmt.format(self))
-        return stem + self.file_path.suffix
+        fmt = '{0.ARTIST} - {0.TITLE}'
+        if self.ARTIST == self.ALBUMARTIST and not include_artist_name:
+            fmt = '{0.TITLE}'
+        #
+        stem = PRX_INVALID_FILENAME.sub(SAFE_REPLACEMENT, fmt.format(self))
+        prefix = ''
+        if self.prefix:
+            if include_medium_number:
+                if self.sided_position:
+                    prefix = 'd%s%s' % (self.medium_number,
+                                        self.prefix)
+                else:
+                    prefix = 'd%st%s' % (self.medium_number,
+                                         self.prefix)
+                #
+            else:
+                prefix = self.prefix
+            #
+        #
+        return prefix + stem + self.file_path.suffix
 
     def update_tags(self, **tags_map):
         """Update the provided tags given as strings
@@ -468,7 +525,7 @@ class MediumSide:
             range(self.track_number_offset + 1,
                   self.maximum_track_number + 1))
 
-    def get_sided_number(self, track_number):
+    def get_sided_position(self, track_number):
         """Return a sided number"""
         sided_track_number = track_number - self.track_number_offset
         if sided_track_number < 1:
@@ -477,12 +534,13 @@ class MediumSide:
             raise TrackNumberAboveMaximum
         #
         if self.number_of_tracks == 1:
-            return self.name
+            return SidedTrackPosition(self.name)
         #
         if self.number_of_tracks < 10:
-            return '%s%d' % (self.name, sided_track_number)
+            return SidedTrackPosition(
+                '%s%d' % (self.name, sided_track_number))
         #
-        return '%s%02d' % (self.name, sided_track_number)
+        return SidedTrackPosition('%s%02d' % (self.name, sided_track_number))
 
 
 class BothSides:
@@ -531,7 +589,6 @@ class SidedMedium(Medium):
     kw_surplus_total = 'total_surplus'
     kw_ignored_tracks = 'ignored tracks'
     kw_missing_track_numbers = 'missing track numbers'
-    prx_sided_number = re.compile(r'\A([^\d]+)(?:(\d+))?\Z')
 
     def __init__(self,
                  album=None,
@@ -638,10 +695,10 @@ class SidedMedium(Medium):
         #
         return (first_side_name, second_side_name)
 
-    def reset_sided_numbers(self):
+    def reset_sided_positions(self):
         """Reset sided numbers on all tracks"""
         for track in self.all_tracks:
-            track.reset_sided_number()
+            track.reset_sided_position()
         #
 
     def determine_errors(self):
@@ -682,24 +739,18 @@ class SidedMedium(Medium):
         """Analyze the tracklist and return a BothSides instance.
         Requires all tracks to have a proper track number.
         """
-        self.reset_sided_numbers()
+        self.reset_sided_positions()
         self.determine_errors()
         detected_sides = []
         current_side = None
         first_side_tracks = None
         for (track_number, track) in sorted(self.tracks_map.items()):
-            existing_sided_number = track.sided_number
-            if existing_sided_number:
-                sided_match = self.prx_sided_number.match(
-                    existing_sided_number)
-                current_side = sided_match.group(1)
+            if track.sided_position:
+                current_side = track.sided_position.side_name
                 if current_side not in detected_sides:
                     detected_sides.append(current_side)
                 #
-                if sided_match.group(2):
-                    sided_track_number = int(sided_match.group(2), 10)
-                else:
-                    sided_track_number = 1
+                sided_track_number = track.sided_position.number
                 #
                 if len(detected_sides) == 2 and not first_side_tracks:
                     first_side_tracks = track_number - sided_track_number
@@ -778,7 +829,7 @@ class SidedMedium(Medium):
         #
         # Store the both_sides attribute
         self.sides = both_sides
-        self.apply_sided_numbering()
+        self.apply_sided_positioning()
 
     def accumulated_track_lengths(self, side):
         """Count track lengths on side
@@ -791,13 +842,13 @@ class SidedMedium(Medium):
         #
         return side_duration
 
-    def apply_sided_numbering(self):
+    def apply_sided_positioning(self):
         """Apply sided numbering"""
         for side in (0, 1):
             current_side = self.sides[side]
             for track_number in current_side.allowed_track_numbers:
-                self.tracks_map[track_number].sided_number = \
-                    current_side.get_sided_number(track_number)
+                self.tracks_map[track_number].sided_position = \
+                    current_side.get_sided_position(track_number)
             #
         #
 
