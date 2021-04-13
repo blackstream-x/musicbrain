@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
+
 copy_tracklist_gui.py
 
 Copy a tracklist to the clipboard
+(Tkinter GUI supporting Nautilus script integration)
 
 """
 
@@ -12,12 +14,13 @@ Copy a tracklist to the clipboard
 import os
 import pathlib
 import sys
-# import textwrap
-# import time
 
 import tkinter
+
 from tkinter import filedialog
 from tkinter import messagebox
+
+# local module
 
 import audio_metadata
 

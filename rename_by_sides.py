@@ -60,6 +60,20 @@ def __get_arguments():
         dest='loglevel',
         help='Limit message output to warnings and errors')
     argument_parser.add_argument(
+        '--include-artist-name',
+        action='store_true',
+        help='Always include the artist name in the file name.'
+        ' The default is to include the artist name only'
+        ' if the artist name does not math the album artist name,'
+        ' eg. in Various Artists releases.')
+    argument_parser.add_argument(
+        '--include-medium-number',
+        action='store_true',
+        help='Always include the medium number in the file name.'
+        ' The default is to include the medium number only'
+        ' if the release has multiple media and not all of them'
+        ' are sided with two unique side names each.')
+    argument_parser.add_argument(
         '-f', '--first-side-tracks',
         type=int,
         help='Set the number of tracks of the first side')
@@ -67,7 +81,7 @@ def __get_arguments():
         '-m', '--medium',
         type=int,
         default=1,
-        help='Select medium number MEDIUM (%(default)s)')
+        help='Select medium number MEDIUM (default: %(default)s)')
     argument_parser.add_argument(
         '-s', '--side-names',
         nargs=2,
@@ -92,8 +106,7 @@ def main(arguments):
     found_release = audio_metadata.get_release_from_path(arguments.directory)
     LOGGER.heading(str(found_release), style=LOGGER.box_formatter.double)
     try:
-        sided_medium = audio_metadata.SidedMedium.from_medium(
-            found_release[arguments.medium])
+        sided_medium = found_release[arguments.medium].copy()
     except KeyError:
         LOGGER.exit_with_error('Medium #%s not found', arguments.medium)
     #
@@ -112,7 +125,10 @@ def main(arguments):
     renamings = []
     for track in sided_medium.tracks_list:
         old_name = track.file_path.name
-        new_name = track.suggested_filename()
+        new_name = track.suggested_filename(
+            include_artist_name=arguments.include_artist_name,
+            include_medium_number=found_release.medium_prefixes_required
+            or arguments.include_medium_number)
         if new_name != old_name:
             LOGGER.info(
                 'Renaming %r\n'

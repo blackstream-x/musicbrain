@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
+
 rename_by_sides_gui.py
 
 Rename tracks according to media sides
+(Tkinter GUI supporting Nautilus script integration)
 
 """
 
@@ -12,12 +14,13 @@ Rename tracks according to media sides
 import os
 import pathlib
 import sys
-# import textwrap
-# import time
 
 import tkinter
+
 from tkinter import filedialog
 from tkinter import messagebox
+
+# local module
 
 import audio_metadata
 
@@ -67,13 +70,13 @@ class SideDataSnapshot:
         self.length = tkinter.StringVar()
         self.tracks = tkinter.StringVar()
 
-    def update_from_side(self, sided_medium, side_index):
+    def update_from_side(self, medium, side_index):
         """Set variables from the medium side"""
-        self.name.set(sided_medium.sides[side_index].name)
+        self.name.set(medium.sides[side_index].name)
         self.length.set(
             '(side length: %02d:%02d)' % divmod(
-                sided_medium.accumulated_track_lengths(side_index), 60))
-        self.tracks.set(sided_medium.tracks_on_side(side_index))
+                medium.accumulated_track_lengths(side_index), 60))
+        self.tracks.set(medium.tracks_on_side(side_index))
 
 
 class ReleaseData:
@@ -283,6 +286,8 @@ class UserInterface():
         self.tracks_slider = None
         self.first_side_tracks = None
         self.current_medium_number = None
+        self.always_include_artist = tkinter.IntVar()
+        self.include_medium = tkinter.IntVar()
         self.sided_medium = None
         self.side_data = [SideDataSnapshot(), SideDataSnapshot()]
         self.action_frame = None
@@ -350,20 +355,53 @@ class UserInterface():
             column=0,
             padx=4,
             sticky=tkinter.E)
+        file_name_options_label = tkinter.Label(
+            self.action_frame,
+            text='File name options:',
+            justify=tkinter.LEFT)
+        file_name_options_label.grid(
+            row=3,
+            column=0,
+            padx=4,
+            sticky=tkinter.E)
+        include_artist = tkinter.Checkbutton(
+            self.action_frame,
+            text='Always include artist in file name',
+            variable=self.always_include_artist,
+            justify=tkinter.LEFT)
+        include_artist.grid(
+            row=3,
+            column=1,
+            columnspan=3,
+            padx=4,
+            sticky=tkinter.W)
+        include_medium = tkinter.Checkbutton(
+            self.action_frame,
+            text='Include medium prefix in file name',
+            variable=self.include_medium,
+            justify=tkinter.LEFT)
+        include_medium.grid(
+            row=4,
+            column=1,
+            columnspan=3,
+            padx=4,
+            sticky=tkinter.W)
         slider_label = tkinter.Label(
             self.action_frame,
             text='Number of tracks on the first side:')
         slider_label.grid(
-            row=3,
+            row=5,
             column=0,
+            padx=4,
             sticky=tkinter.E)
         slider_reset_button = tkinter.Button(
             self.action_frame,
             command=self.guess_sides,
             text='Set to optimum value')
         slider_reset_button.grid(
-            row=4,
+            row=6,
             column=0,
+            padx=4,
             sticky=tkinter.E)
         for side_index in (0, 1):
             side_frame = tkinter.Frame(
@@ -407,7 +445,7 @@ class UserInterface():
                 padx=4,
                 sticky=tkinter.W + tkinter.N)
             side_frame.grid(
-                row=5,
+                row=7,
                 column=2 * side_index,
                 columnspan=3,
                 sticky=tkinter.N + tkinter.W + tkinter.E + tkinter.S)
@@ -526,6 +564,7 @@ class UserInterface():
                 padx=4,
                 sticky=tkinter.W)
             self.current_medium_number = None
+            self.include_medium.set(self.release.medium_prefixes_required)
             self.read_medium()
             break
         #
@@ -547,8 +586,7 @@ class UserInterface():
             return
         #
         previous_sided_medium = self.sided_medium
-        self.sided_medium = audio_metadata.SidedMedium.from_medium(
-            self.release[selected_medium_number])
+        self.sided_medium = self.release[selected_medium_number].copy()
         try:
             self.sided_medium.set_sides()
         except ValueError as error:
@@ -577,8 +615,9 @@ class UserInterface():
         self.tracks_slider.grid(
             column=1,
             columnspan=3,
-            row=3,
+            row=5,
             rowspan=2,
+            padx=4,
             sticky=tkinter.W)
         self.update_sides_display()
 
@@ -664,7 +703,9 @@ class UserInterface():
         renamings = []
         for track in self.sided_medium.tracks_list:
             old_name = track.file_path.name
-            new_name = track.suggested_filename()
+            new_name = track.suggested_filename(
+                include_artist_name=bool(self.always_include_artist.get()),
+                include_medium_number=bool(self.include_medium.get()))
             if new_name != old_name:
                 renamings.append((track.file_path, new_name))
             #
@@ -674,8 +715,7 @@ class UserInterface():
                 self.main_window,
                 renamings)
             # Refresh release and medium information
-            self.read_release()
-            self.read_medium()
+            self.choose_release(keep_existing=True)
         else:
             messagebox.showinfo(
                 'No renaming necessary',
