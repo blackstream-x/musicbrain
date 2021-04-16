@@ -478,8 +478,7 @@ class UserInterface():
         choose_button = tkinter.Button(
             buttonarea,
             text='Choose another release…',
-            command=self.choose_release,
-            default=tkinter.ACTIVE)
+            command=self.choose_release)
         choose_button.grid(
             row=0,
             column=1,
