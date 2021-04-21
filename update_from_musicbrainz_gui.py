@@ -453,7 +453,7 @@ class UserInterface():
 
     def update_metadata(self):
         """Lookup release in MusicBrainz"""
-        # TODO:
+        # TODO (also see https://stackoverflow.com/a/29126154):
         # 1. Show window with Album name and artist name entries
         #    from the release (maybe also a "Various Artists" and
         #    a clear and reset button, and a "continue" button

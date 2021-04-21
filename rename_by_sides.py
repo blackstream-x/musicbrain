@@ -23,6 +23,7 @@ import sys
 
 import audio_metadata
 import dialog
+import safe_rename
 
 
 #
@@ -122,33 +123,30 @@ def main(arguments):
         ' * First side:  %02d:%02d' % divmod(side_lengths[0], 60))
     LOGGER.debug(
         ' * Second side: %02d:%02d' % divmod(side_lengths[1], 60))
-    renamings = []
+    renaming_plan = safe_rename.RenamingPlan()
     for track in sided_medium.tracks_list:
-        old_name = track.file_path.name
-        new_name = track.suggested_filename(
-            include_artist_name=arguments.include_artist_name,
-            include_medium_number=found_release.medium_prefixes_required
-            or arguments.include_medium_number)
-        if new_name != old_name:
-            LOGGER.info(
-                'Renaming %r\n'
-                '      to %r',
-                old_name,
-                new_name)
-            renamings.append((track.file_path, new_name))
-        #
+        renaming_plan.add(
+            track.file_path,
+            track.suggested_filename(
+                include_artist_name=arguments.include_artist_name,
+                include_medium_number=found_release.medium_prefixes_required
+                or arguments.include_medium_number))
     #
-    if not renamings:
+    if not renaming_plan:
         LOGGER.info(
             'All files already named correctly. No further action required.')
         return RETURNCODE_OK
     #
+    for (old_path, new_path) in renaming_plan:
+        LOGGER.info(
+            'Renaming %r\n'
+            '      to %r',
+            old_path.name,
+            new_path.name)
+    #
     if INTERROGATOR.confirm('Rename these files?'):
-        for (old_track_path, new_name) in renamings:
-            new_track_path = old_track_path.parent / new_name
-            old_track_path.rename(new_track_path)
-            LOGGER.info('Renamed %s to %s', old_track_path, new_track_path)
-        #
+        result = renaming_plan.execute()
+        LOGGER.info(str(result))
         return RETURNCODE_OK
     #
     LOGGER.info('Not confirmed -> end.')
