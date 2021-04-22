@@ -24,9 +24,11 @@ from tkinter import messagebox
 
 import musicbrainzngs
 
-# local module
+# local modules
 
 import audio_metadata
+import gui_commons
+import safer_mass_rename
 
 
 #
@@ -80,162 +82,6 @@ class ReleaseData:
         self.albumartist.set(release.albumartist)
         self.medium_numbers = tuple(
             str(number) for number in release.medium_numbers)
-
-
-class ModalDialog(tkinter.Toplevel):
-
-    """Adapted from
-    <https://effbot.org/tkinterbook/tkinter-dialog-windows.htm>
-    """
-
-    def __init__(self,
-                 parent,
-                 content,
-                 title=None,
-                 cancel_button=True):
-        """Create the toplevel window and wait until the dialog is closed"""
-        super().__init__(parent)
-        self.transient(parent)
-        if title:
-            self.title(title)
-        #
-        self.parent = parent
-        self.initial_focus = self
-        self.body = tkinter.Frame(self)
-        self.create_content(content)
-        self.body.grid(padx=5, pady=5, sticky=tkinter.E + tkinter.W)
-        self.create_buttonbox(cancel_button=cancel_button)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.action_cancel)
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def create_content(self, content):
-        """Add content to body"""
-        for (heading, paragraph) in content:
-            heading_area = tkinter.Label(
-                self.body,
-                text=heading,
-                font=(None, 11, 'bold'),
-                justify=tkinter.LEFT)
-            heading_area.grid(sticky=tkinter.W, padx=5, pady=10)
-            text_area = tkinter.Label(
-                self.body,
-                text=paragraph,
-                justify=tkinter.LEFT)
-            text_area.grid(sticky=tkinter.W, padx=5, pady=5)
-        #
-
-    def create_buttonbox(self, cancel_button=True):
-        """Add standard button box."""
-        box = tkinter.Frame(self)
-        button = tkinter.Button(
-            box,
-            text="OK",
-            width=10,
-            command=self.action_ok,
-            default=tkinter.ACTIVE)
-        button.grid(padx=5, pady=5, row=0, column=0, sticky=tkinter.W)
-        if cancel_button:
-            button = tkinter.Button(
-                box,
-                text="Cancel",
-                width=10,
-                command=self.action_cancel)
-            button.grid(padx=5, pady=5, row=0, column=1, sticky=tkinter.E)
-        #
-        self.bind("<Return>", self.action_ok)
-        box.grid(padx=5, pady=5, sticky=tkinter.E + tkinter.W)
-
-    #
-    # standard button semantics
-
-    def action_ok(self, event=None):
-        """Clean up"""
-        del event
-        self.withdraw()
-        self.update_idletasks()
-        self.action_cancel()
-
-    def action_cancel(self, event=None):
-        """Put focus back to the parent window"""
-        del event
-        self.parent.focus_set()
-        self.destroy()
-
-
-class InfoDialog(ModalDialog):
-
-    """Info dialog,
-    instantiated with a seriess of (heading, paragraph) tuples
-    after the parent window
-    """
-
-    def __init__(self,
-                 parent,
-                 *content,
-                 title=None):
-        """..."""
-        super().__init__(parent, content, title=title, cancel_button=False)
-
-
-class ConfirmRenameDialog(ModalDialog):
-
-    """Info dialog,
-    instantiated with a seriess of (heading, paragraph) tuples
-    after the parent window
-    """
-
-    def __init__(self,
-                 parent,
-                 renamings):
-        """..."""
-        self.renamings = renamings
-        content = [
-            (
-                'The following files will be renamed:',
-                '\n'.join(
-                    '%r\n → %r' % (path.name, new_file_name)
-                    for (path, new_file_name) in renamings))]
-        super().__init__(parent,
-                         content,
-                         title='Confirm rename',
-                         cancel_button=True)
-
-    def action_ok(self, event=None):
-        """Clean up"""
-        del event
-        error_messages = []
-        successful = 0
-        for (old_path, new_file_name) in self.renamings:
-            try:
-                old_path.rename(old_path.parent / new_file_name)
-            except OSError as error:
-                error_messages.append(
-                    'Error renaming %s to %s:\n%s' % (
-                        old_path.name,
-                        new_file_name,
-                        error))
-            else:
-                successful += 1
-            #
-        #
-        self.withdraw()
-        self.update_idletasks()
-        if error_messages:
-            InfoDialog(
-                self,
-                ('%s files renamed succesfully.' % successful, ''),
-                ('%s errors occured:' % len(error_messages),
-                 '\n'.join(error_messages)),
-                title='Errors during rename')
-        else:
-            messagebox.showinfo(
-                'Success',
-                '%s files have been renamed successfully.' % successful,
-                icon=messagebox.INFO)
-        #
-        self.action_cancel()
 
 
 class UserInterface():
@@ -434,7 +280,7 @@ class UserInterface():
         """Show information about the application
         in a modal dialog
         """
-        InfoDialog(
+        gui_commons.InfoDialog(
             self.main_window,
             (SCRIPT_NAME,
              'Version: {0}\nProject homepage: {1}'.format(
@@ -474,22 +320,21 @@ class UserInterface():
         # 6. After confirmation. change metadata and write the files
         # 7. Ask if the files should be renamed, and for the renaming options
         required_includes = self.get_renaming_options()
-        renamings = []
+        renaming_plan = safer_mass_rename.RenamingPlan()
         for medium in self.release.media_list:
             for track in medium.tracks_list:
-                old_name = track.file_path.name
-                new_name = track.suggested_filename(
-                    include_artist_name=required_includes['artist_name'],
-                    include_medium_number=required_includes['medium_number'])
-                if new_name != old_name:
-                    renamings.append((track.file_path, new_name))
-                #
+                renaming_plan.add(
+                    track.file_path,
+                    track.suggested_filename(
+                        include_artist_name=required_includes['artist_name'],
+                        include_medium_number=\
+                            required_includes['medium_number']))
             #
         #
-        if renamings:
-            ConfirmRenameDialog(
+        if renaming_plan:
+            gui_commons.ConfirmRenameDialog(
                 self.main_window,
-                renamings)
+                renaming_plan)
             # Refresh release and medium information
             self.choose_release(keep_existing=True)
         else:

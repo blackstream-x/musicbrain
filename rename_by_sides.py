@@ -23,7 +23,7 @@ import sys
 
 import audio_metadata
 import dialog
-import safe_rename
+import safer_mass_rename
 
 
 #
@@ -123,7 +123,7 @@ def main(arguments):
         ' * First side:  %02d:%02d' % divmod(side_lengths[0], 60))
     LOGGER.debug(
         ' * Second side: %02d:%02d' % divmod(side_lengths[1], 60))
-    renaming_plan = safe_rename.RenamingPlan()
+    renaming_plan = safer_mass_rename.RenamingPlan()
     for track in sided_medium.tracks_list:
         renaming_plan.add(
             track.file_path,
@@ -137,12 +137,12 @@ def main(arguments):
             'All files already named correctly. No further action required.')
         return RETURNCODE_OK
     #
-    for (old_path, new_path) in renaming_plan:
+    for item in renaming_plan:
         LOGGER.info(
             'Renaming %r\n'
             '      to %r',
-            old_path.name,
-            new_path.name)
+            item.source_path.name,
+            item.target_path.name)
     #
     if INTERROGATOR.confirm('Rename these files?'):
         result = renaming_plan.execute()
