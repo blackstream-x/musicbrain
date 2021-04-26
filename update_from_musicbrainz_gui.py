@@ -16,13 +16,13 @@ import os
 import pathlib
 import re
 import sys
-
 import tkinter
+import webbrowser
 
 from tkinter import filedialog
 from tkinter import messagebox
 
-# nonstandardlib module
+# non-standardlib module
 
 import musicbrainzngs
 
@@ -67,13 +67,32 @@ PRX_MBID = re.compile(
     r'.+? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
     re.X)
 
+# Phases
+CHOOSE_LOCAL_RELEASE = 'choose_local_release'
+LOCAL_RELEASE_DATA = 'local_release_data'
+SELECT_MB_RELEASE = 'select_mb_release'
+CONFIRM_METADATA = 'confirm_metadata'
+RENAME_OPTIONS = 'rename_options'
+CONFIRM_RENAME = 'confirm_rename'
+RENAME_FILES = 'rename_files'
+
+PHASES = (
+    CHOOSE_LOCAL_RELEASE,
+    LOCAL_RELEASE_DATA,
+    SELECT_MB_RELEASE,
+    CONFIRM_METADATA,
+    RENAME_OPTIONS,
+    CONFIRM_RENAME,
+    RENAME_FILES)
+
+FS_MB_RELEASE = 'https://musicbrainz.org/release/%s'
 
 #
 # Helper Functions
 #
 
 
-def mbid_helper(source_text):
+def extract_mbid(source_text):
     """Return a musicbrainz ID from a string"""
     try:
         return PRX_MBID.match(source_text).group(1)
@@ -81,6 +100,11 @@ def mbid_helper(source_text):
         raise ValueError(
             '%r does not contain a MusicBrainz ID' % source_text) from error
     #
+
+
+def open_in_musicbrainz(release_id):
+    """Open the webbrowser and show a release in MusicBrainz"""
+    webbrowser.open_new(FS_MB_RELEASE % release_id)
 
 
 #
@@ -132,6 +156,68 @@ class Namespace(dict):
         del self[name]
 
 
+class MusicBrainzTrack():
+
+    """Keep data from a MusicBrainz track"""
+
+    def __init__(self, track_data):
+        """Set data from a track data structure"""
+        self.number = track_data['number']
+        self.position = track_data['position']
+        self.length = track_data['length']
+        self.title = track_data['recording']['title']
+        self.artist_credit = track_data['artist-credit-phrase']
+        try:
+            self.length = int(track_data['length'])
+        except (KeyError, ValueError):
+            self.length = None
+        #
+
+
+class MusicBrainzMedium():
+
+    """Keep data from a MusicBrainz medium"""
+
+    def __init__(self, medium_data):
+        """Set data from a medium data structure"""
+        self.format = medium_data['format']
+        self.position = medium_data.get('position')
+        self.track_count = medium_data['track-count']
+        self.media = [
+            MusicBrainzTrack(track_data)
+            for track_data in medium_data['track-list']]
+
+
+class MusicBrainzRelease():
+
+    """Keep data from a MusicBrainz release"""
+
+    def __init__(self, release_data):
+        """Set data from a release query result"""
+        self.id_ = release_data['id']
+        self.date = release_data.get('date')
+        self.title = release_data['title']
+        self.artist_credit = release_data['artist-credit-phrase']
+        self.media = [
+            MusicBrainzMedium(medium_data)
+            for medium_data in release_data['medium-list']]
+
+    @property
+    def media_summary(self):
+        """Summary of contained media"""
+        seen_formats = {}
+        for single_medium in self.media:
+            seen_formats.setdefault(single_medium.format, []).append(1)
+        return ' + '.join(
+            '%s × %s' % (len(values), format_name)
+            for (format_name, values) in seen_formats.items())
+
+    @property
+    def total_tracks(self):
+        """Sum of media track counts"""
+        return sum(single_medium.track_count for single_medium in self.media)
+
+
 class UserInterface():
 
     """GUI using tkinter"""
@@ -157,18 +243,6 @@ class UserInterface():
     # 6. After confirmation. change metadata and write the files
     # 7. Ask if the files should be renamed, and for the renaming options
 
-    action_methods = (
-        'do_lookup_releases',
-        'do_get_release',
-        'do_change_metadata',
-        'do_rename_files')
-    display_methods = (
-        'show_local_release',
-        'show_musicbrainz_releases',
-        'show_metadata_changes',
-        'show_rename_options',
-        'show_result')
-
     def __init__(self, directory_path):
         """Build the GUI"""
         self.main_window = tkinter.Tk()
@@ -178,57 +252,55 @@ class UserInterface():
             action_area=None,
             buttons_area=None)
         self.variables = Namespace(
-            current_panel=0,
             mbid_entry=tkinter.StringVar(),
             album=tkinter.StringVar(),
-            albumartist=tkinter.StringVar())
-        self.release = None
-        # self.release_data = ReleaseData()
-        self.directory_path = directory_path
-        self.choose_release(
+            albumartist=tkinter.StringVar(),
+            release_id=tkinter.StringVar(),
+            release=None,
+            current_phase=CHOOSE_LOCAL_RELEASE,
+            current_panel=None,
+            directory_path=directory_path,
+            disable_next_button=False,
+            errors=[],
+            mb_releases=[])
+        self.choose_local_release(
             keep_existing=True,
             quit_on_empty_choice=True)
         self.main_window.mainloop()
 
-    def __show_errors(self, errors=None):
+    def __show_errors(self):
         """Show errors if there are any"""
-        if errors:
+        if self.variables.errors:
             errors_frame = tkinter.Frame(
                 self.widgets.action_area,
                 borderwidth=2,
                 padx=5,
                 pady=5,
                 relief=tkinter.GROOVE)
-            current_row = 0
-            for (label, message) in errors.items():
-                error_label = tkinter.Label(
-                    errors_frame,
-                    text='%s:' % label,
-                    justify=tkinter.LEFT)
-                error_label.grid(
-                    row=current_row,
-                    column=0,
-                    padx=4,
-                    sticky=tkinter.E)
+            for message in self.variables.errors:
                 error_value = tkinter.Label(
                     errors_frame,
                     text=message,
                     justify=tkinter.LEFT)
                 error_value.grid(
-                    row=current_row,
-                    column=1,
-                    columnspan=3,
                     padx=4,
                     sticky=tkinter.W)
-                current_row += 1
             #
+            self.variables.errors.clear()
             errors_frame.grid(
                 padx=4,
                 pady=2,
                 sticky=tkinter.E + tkinter.W)
         #
 
-    def show_local_release(self):
+    def local_release_data(self):
+        """Set local release data"""
+        self.variables.album.set(
+            self.variables.release.album or '')
+        self.variables.albumartist.set(
+            self.variables.release.albumartist or '')
+
+    def panel_local_release_data(self):
         """Show the local release’s title and artist"""
         search_frame = tkinter.Frame(
             self.widgets.action_area,
@@ -312,14 +384,58 @@ class UserInterface():
             sticky=tkinter.E + tkinter.W)
         #
 
-# =============================================================================
-#         'show_musicbrainz_releases',
-#         'show_metadata_changes',
-#         'show_rename_options',
-#         'show_result')
-# =============================================================================
+    def panel_select_mb_release(self):
+        """Panel with Musicbrainz release selection"""
+        select_frame = tkinter.Frame(
+            self.widgets.action_area,
+            borderwidth=2,
+            padx=5,
+            pady=5,
+            relief=tkinter.GROOVE)
+        current_row = 0
+        for single_release in self.variables.mb_releases:
+            def show_release(release_id=single_release.id_):
+                """Internal function definition to process
+                the release id in the "real" handler function,
+                compare <https://tkdocs.com/shipman/extra-args.html>.
+                """
+                return open_in_musicbrainz(release_id)
+            #
+            release_select = tkinter.Radiobutton(
+                select_frame,
+                justify=tkinter.LEFT,
+                text='%s – %s\n%s, %s (%s total tracks)' % (
+                    single_release.artist_credit,
+                    single_release.title,
+                    single_release.date,
+                    single_release.media_summary,
+                    single_release.total_tracks),
+                value=single_release.id_,
+                variable=self.variables.release_id)
+            release_select.grid(
+                row=current_row,
+                column=0,
+                padx=4,
+                sticky=tkinter.W)
+            release_show = tkinter.Button(
+                select_frame,
+                text='Show release',
+                command=show_release)
+            release_show.grid(
+                row=current_row,
+                column=1,
+                padx=4,
+                sticky=tkinter.W)
+            if current_row == 0:
+                release_select.select()
+            #
+            current_row += 1
+        select_frame.grid(
+            padx=4,
+            pady=2,
+            sticky=tkinter.E + tkinter.W)
 
-    def __show_panel(self, panel_number=0, errors=None):
+    def __show_panel(self):
         """Show a panel.
         Add the "Previous", "Next", "Choose another relase",
         "About" and "Quit" buttons at the bottom
@@ -337,33 +453,26 @@ class UserInterface():
             padx=5,
             pady=5,
             relief=tkinter.GROOVE)
-        display_method = self.show_local_release
-        disable_next_button = False
         try:
-            panel_name = self.display_methods[panel_number]
-            display_method = getattr(self, panel_name)
+            panel_method = getattr(
+                self,
+                'panel_%s' % self.variables.current_phase)
         except AttributeError:
-            errors['Panel not found'] = (
-                'Display method for Panel #%s (%r)'
-                ' has not been implemented yet' % (panel_number, panel_name))
-        except IndexError:
-            errors['Panel not found'] = (
-                'Panel number #%s out of range' % panel_number)
+            self.variables.errors.append(
+                'Panel for Phase %r has not been implemented yet,'
+                ' going back to phase %r.' % (
+                    self.variables.current_phase,
+                    self.variables.current_panel))
+            self.variables.current_phase = self.variables.current_panel
+            panel_method = getattr(
+                self,
+                'panel_%s' % self.variables.current_phase)
+            self.variables.disable_next_button = False
         else:
-            self.variables.current_panel = panel_number
-            try:
-                disable_next_button = errors.pop('disable_next_button')
-            except (AttributeError, KeyError):
-                pass
-            #
+            self.variables.current_panel = self.variables.current_phase
         #
-        if panel_number != self.variables.current_panel:
-            panel_number = self.variables.current_panel
-            panel_name = self.display_methods[panel_number]
-            display_method = getattr(self, panel_name)
-        #
-        self.__show_errors(errors=errors)
-        display_method()
+        self.__show_errors()
+        panel_method()
         self.widgets.action_area.grid(
             padx=4,
             pady=2,
@@ -375,52 +484,51 @@ class UserInterface():
             padx=5,
             pady=5,
             relief=tkinter.GROOVE)
-        if panel_number in (1, 2, 3):
-            previous_button = tkinter.Button(
-                self.widgets.buttons_area,
-                text='< Previous',
-                command=self.previous_panel)
-            previous_button.grid(
-                row=0,
-                column=0,
-                sticky=tkinter.W,
-                padx=5,
-                pady=5)
         #
-        if disable_next_button:
+        if self.variables.current_phase in (
+                SELECT_MB_RELEASE,
+                CONFIRM_METADATA,
+                RENAME_OPTIONS,
+                CONFIRM_RENAME,
+                RENAME_FILES):
+            previous_button_state = tkinter.NORMAL
+        else:
+            previous_button_state = tkinter.DISABLED
+        #
+        previous_button = tkinter.Button(
+            self.widgets.buttons_area,
+            text='< Previous',
+            command=self.previous_panel,
+            state=previous_button_state)
+        previous_button.grid(
+            row=0,
+            column=0,
+            sticky=tkinter.W,
+            padx=5,
+            pady=5)
+        #
+        if self.variables.disable_next_button or \
+                self.variables.current_phase == RENAME_FILES:
             next_button_state = tkinter.DISABLED
         else:
             next_button_state = tkinter.NORMAL
         #
-        if panel_number in (0, 1, 2):
-            next_button = tkinter.Button(
-                self.widgets.buttons_area,
-                text='> Next',
-                command=self.next_panel,
-                state=next_button_state)
-            next_button.grid(
-                row=0,
-                column=1,
-                sticky=tkinter.W,
-                padx=5,
-                pady=5)
-        elif panel_number == 3:
-            finish_button = tkinter.Button(
-                self.widgets.buttons_area,
-                text='Finish',
-                command=self.next_panel,
-                state=next_button_state)
-            finish_button.grid(
-                row=0,
-                column=1,
-                sticky=tkinter.W,
-                padx=5,
-                pady=5)
-        #
+        self.variables.disable_next_button = False
+        next_button = tkinter.Button(
+            self.widgets.buttons_area,
+            text='> Next',
+            command=self.next_panel,
+            state=next_button_state)
+        next_button.grid(
+            row=0,
+            column=1,
+            sticky=tkinter.W,
+            padx=5,
+            pady=5)
         choose_button = tkinter.Button(
             self.widgets.buttons_area,
             text='Choose another release…',
-            command=self.choose_release)
+            command=self.choose_local_release)
         choose_button.grid(
             row=0,
             column=2,
@@ -456,46 +564,66 @@ class UserInterface():
 
     def previous_panel(self):
         """Go to the next panel"""
-        messagebox.showinfo(
-            '"Previous" not implemented yet',
-            'Now, the previous panel would be shown.',
-            icon=messagebox.WARNING)
+        phase_index = PHASES.index(self.variables.current_panel)
+        try:
+            rollback_method = getattr(
+                self,
+                'rollback_%s' % self.variables.current_panel)
+        except AttributeError:
+            self.variables.errors.append(
+                'Rollback method for phase #%s (%r)'
+                ' has not been defined yet' % (
+                    phase_index, self.variables.current_panel))
+        except NotImplementedError:
+            self.variables.errors.append(
+                'Rollback method for phase #%s (%r)'
+                ' has not been implemented yet' % (
+                    phase_index, self.variables.current_panel))
+        else:
+            self.variables.current_phase = PHASES[phase_index - 1]
+            rollback_method()
         #
+        self.__show_panel()
 
     def next_panel(self):
         """Go to the next panel"""
-        panel_number = self.variables.current_panel
+        next_index = PHASES.index(self.variables.current_panel) + 1
         try:
-            action_name = self.action_methods[panel_number]
-            method = getattr(self, action_name)
-        except AttributeError:
-            errors = dict(
-                generic='Action method for Panel #%s (%r)'
-                ' has not been implemented yet' % (panel_number, action_name))
-            panel_number = 0
+            next_phase = PHASES[next_index]
         except IndexError:
-            errors = dict(
-                generic='Panel number #%s out of range' % panel_number)
-            panel_number = 0
-        else:
-            panel_number, errors = method()
+            self.variables.errors.append(
+                'Phase number #%s out of range' % next_index)
         #
-        self.__show_panel(panel_number=panel_number, errors=errors)
+        try:
+            action_method = getattr(self, next_phase)
+        except AttributeError:
+            self.variables.errors.append(
+                'Action method for phase #%s (%r)'
+                ' has not been defined yet' % (next_index, next_phase))
+        except NotImplementedError:
+            self.variables.errors.append(
+                'Action method for phase #%s (%r)'
+                ' has not been implemented yet' % (next_index, next_phase))
+        else:
+            self.variables.current_phase = next_phase
+            action_method()
+        #
+        self.__show_panel()
 
-    def choose_release(self,
-                       keep_existing=False,
-                       preset_path=None,
-                       quit_on_empty_choice=False):
+    def choose_local_release(self,
+                             keep_existing=False,
+                             preset_path=None,
+                             quit_on_empty_choice=False):
         """Choose a release via file dialog"""
         if preset_path:
             if not preset_path.is_dir():
                 preset_path = preset_path.parent
             #
         else:
-            preset_path = self.directory_path
+            preset_path = self.variables.directory_path
         #
         while True:
-            if not keep_existing or self.directory_path is None:
+            if not keep_existing or self.variables.directory_path is None:
                 selected_directory = filedialog.askdirectory(
                     initialdir=str(preset_path) or os.getcwd())
                 if not selected_directory:
@@ -504,10 +632,12 @@ class UserInterface():
                     #
                     return
                 #
-                self.directory_path = pathlib.Path(selected_directory)
+                self.variables.directory_path = pathlib.Path(
+                    selected_directory)
             #
             try:
-                self.read_release()
+                self.variables.release = audio_metadata.get_release_from_path(
+                    self.variables.directory_path)
             except ValueError as error:
                 messagebox.showerror(
                     'Error while reading release',
@@ -516,16 +646,10 @@ class UserInterface():
                 keep_existing = False
                 continue
             #
-            self.variables.album.set(self.release.album or '')
-            self.variables.albumartist.set(self.release.albumartist or '')
-            self.__show_panel(panel_number=0)
+            self.variables.current_panel = CHOOSE_LOCAL_RELEASE
+            self.next_panel()
             break
         #
-
-    def read_release(self):
-        """Set self.release by reading self.directory_path"""
-        self.release = audio_metadata.get_release_from_path(
-            self.directory_path)
 
     def show_about(self):
         """Show information about the application
@@ -544,14 +668,16 @@ class UserInterface():
         """Return renaming options"""
         return dict(
             artist_name=False,
-            medium_number=self.release.medium_prefixes_required)
+            medium_number=self.variables.release.medium_prefixes_required)
 
-    def do_lookup_releases(self):
+    def rollback_select_mb_release(self):
+        """No rollback required here"""
+        ...
+
+    def select_mb_release(self):
         """Lookup releases in MusicBrainz"""
-        next_panel = 1
-        errors = {}
         try:
-            release_mbid = mbid_helper(self.variables.mbid_entry.get())
+            release_mbid = extract_mbid(self.variables.mbid_entry.get())
         except ValueError:
             # No (valid) MBID, get (and maybe filter)
             # releases from musicbrainz
@@ -565,42 +691,38 @@ class UserInterface():
                 search_criteria.append('artist:"%s"' % albumartist)
             #
             if not search_criteria:
-                errors.update(
-                    {
-                        'disable_next_button': True,
-                        'Missing data': 'Album name or artist are required.'})
-                return (next_panel, errors)
+                self.variables.errors.append(
+                    'Missing data: album name or artist are required.')
+                self.variables.disable_next_button = True
+                return
             #
             query_result = musicbrainzngs.search_releases(
                 query=' AND '.join(search_criteria))
             #
             release_count = query_result['release-count']
             if not release_count:
-                errors.update(
-                    {
-                        'disable_next_button': True,
-                        'Not found': 'No matching releases found.'})
-                return (next_panel, errors)
+                self.variables.errors.append(
+                    'No matching releases found.')
+                self.variables.disable_next_button = True
+                return
             #
             # TODO
             #
-            errors['raw_data'] = json.dumps(query_result, indent=2)
-            return (next_panel, errors)
+            self.variables.mb_releases = [
+                MusicBrainzRelease(single_release)
+                for single_release in query_result['release-list']]
         else:
-            return (next_panel, {'given mbid': release_mbid})
+            release_data = musicbrainzngs.get_release_by_id(
+                release_mbid,
+                includes=['media', 'artists', 'recordings', 'artist-credits'])
+            self.variables.mb_releases = [MusicBrainzRelease(release_data)]
         #
 
-# =============================================================================
-#         'do_get_release',
-#         'do_change_metadata',
-# =============================================================================
-
-    def do_rename_files(self):
+    def rename_files(self):
         """Rename files"""
-        errors = {}
         required_includes = self.get_renaming_options()
         renaming_plan = safer_mass_rename.RenamingPlan()
-        for medium in self.release.media_list:
+        for medium in self.variables.release.media_list:
             for track in medium.tracks_list:
                 renaming_plan.add(
                     track.file_path,
@@ -622,7 +744,6 @@ class UserInterface():
                 'All tracks already have the desired name.',
                 icon=messagebox.INFO)
         #
-        return (4, errors)
 
     def quit(self, event=None):
         """Exit the application"""
