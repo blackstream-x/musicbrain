@@ -11,7 +11,9 @@ Update metadata from a MusicBrainz release
 """
 
 
+import collections
 import json
+import logging
 import os
 import pathlib
 import re
@@ -21,6 +23,7 @@ import webbrowser
 
 from tkinter import filedialog
 from tkinter import messagebox
+from tkinter import ttk
 
 # non-standardlib module
 
@@ -64,7 +67,7 @@ except OSError as error:
 
 
 PRX_MBID = re.compile(
-    r'.+? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
+    r'.*? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
     re.X)
 
 # Phases
@@ -104,7 +107,7 @@ def extract_mbid(source_text):
 
 def open_in_musicbrainz(release_id):
     """Open the webbrowser and show a release in MusicBrainz"""
-    webbrowser.open_new(FS_MB_RELEASE % release_id)
+    webbrowser.open(FS_MB_RELEASE % extract_mbid(release_id))
 
 
 #
@@ -201,26 +204,127 @@ class MusicBrainzRelease():
         self.media = [
             MusicBrainzMedium(medium_data)
             for medium_data in release_data['medium-list']]
+        self.score = 0.0
 
     @property
     def media_summary(self):
-        """Summary of contained media"""
+        """Summary of contained media with track counts"""
         seen_formats = {}
         for single_medium in self.media:
-            seen_formats.setdefault(single_medium.format, []).append(1)
-        return ' + '.join(
-            '%s × %s' % (len(values), format_name)
-            for (format_name, values) in seen_formats.items())
+            seen_formats.setdefault(
+                single_medium.format, []).append(single_medium.track_count)
+        #
+        output_list = []
+        for (format_name, track_counts) in seen_formats.items():
+            if len(track_counts) > 1:
+                output_list.append(
+                    '%s × %s (%s tracks)' % (
+                        len(track_counts),
+                        format_name,
+                        ' + '.join(str(count) for count in track_counts)))
+            else:
+                output_list.append(
+                    '%s (%s tracks)' % (format_name, track_counts[0]))
+            #
+        #
+        return ' + '.join(output_list)
 
     @property
     def total_tracks(self):
         """Sum of media track counts"""
         return sum(single_medium.track_count for single_medium in self.media)
 
+    def __eq__(self, other):
+        """Rich comparison: equals"""
+        return self.id_ == other.id_
+
+    def __gt__(self, other):
+        """Rich comparison: greater than"""
+        return self.score > other.score
+
+
+class ScoreCalculation:
+
+    """Object calculating how good a MusicBrainzRelease
+    matches an audio_metadata.Release
+    by comparing number of media, tracks per medium,
+    TODO: date,
+    …
+    """
+
+    def __init__(self, release):
+        """..."""
+        self.release = release
+        self.date = None
+        collected_dates = set()
+        for medium in release.media_list:
+            for track in medium.tracks_list:
+                try:
+                    found_date = track.DATE
+                except AttributeError:
+                    continue
+                #
+                collected_dates.add(found_date)
+            #
+        #
+        if len(collected_dates) == 1:
+            self.date = collected_dates.pop()
+        #
+
+    def calculate_score(self, mb_release):
+        """Return a float representing how close
+        themusicbrainz release matches self.release
+        """
+        score = 100.0
+        if len(mb_release.media) < self.release.effective_media_count:
+            score = score - 5 * (self.release.effective_media_count
+                                 - len(mb_release.media))
+        #
+        mb_media = [None] + mb_release.media
+        for medium_number in self.release.medium_numbers:
+            try:
+                tracks_in_mb = mb_media[medium_number].track_count
+            except IndexError:
+                score = score - 5
+                continue
+            #
+            local_tracks = self.release[medium_number].effective_total_tracks
+            if tracks_in_mb > local_tracks:
+                score = score - 1.5 * (tracks_in_mb - local_tracks)
+            elif tracks_in_mb < local_tracks:
+                score = score - 3.5 * (local_tracks - tracks_in_mb)
+            #
+        #
+        if self.date and mb_release.date != self.date:
+            if mb_release.date:
+                comparable_date = mb_release.date[:4]
+                try:
+                    difference = int(self.date) - int(comparable_date)
+                except ValueError:
+                    score = score - 7.5
+                else:
+                    score = score - 0.5 * abs(difference)
+                #
+            else:
+                score = score - 7.5
+            #
+        #
+        return score
+
 
 class UserInterface():
 
     """GUI using tkinter"""
+
+    with_border = dict(
+        borderwidth=2,
+        padx=5,
+        pady=5,
+        relief=tkinter.GROOVE)
+    grid_fullwidth = dict(
+        padx=4,
+        pady=2,
+        sticky=tkinter.E + tkinter.W)
 
     # TODO (also see https://stackoverflow.com/a/29126154):
     # 1. Show window with Album name and artist name entries
@@ -250,7 +354,9 @@ class UserInterface():
         musicbrainzngs.set_useragent(SCRIPT_NAME, VERSION, contact=HOMEPAGE)
         self.widgets = Namespace(
             action_area=None,
-            buttons_area=None)
+            buttons_area=None,
+            releases_view=None,
+            scroll_vertical=None)
         self.variables = Namespace(
             mbid_entry=tkinter.StringVar(),
             album=tkinter.StringVar(),
@@ -273,10 +379,7 @@ class UserInterface():
         if self.variables.errors:
             errors_frame = tkinter.Frame(
                 self.widgets.action_area,
-                borderwidth=2,
-                padx=5,
-                pady=5,
-                relief=tkinter.GROOVE)
+                **self.with_border)
             for message in self.variables.errors:
                 error_value = tkinter.Label(
                     errors_frame,
@@ -287,10 +390,7 @@ class UserInterface():
                     sticky=tkinter.W)
             #
             self.variables.errors.clear()
-            errors_frame.grid(
-                padx=4,
-                pady=2,
-                sticky=tkinter.E + tkinter.W)
+            errors_frame.grid(**self.grid_fullwidth)
         #
 
     def local_release_data(self):
@@ -302,138 +402,99 @@ class UserInterface():
 
     def panel_local_release_data(self):
         """Show the local release’s title and artist"""
+        label_grid = dict(
+            column=0,
+            padx=4,
+            sticky=tkinter.E)
+        value_grid = dict(
+            column=1,
+            columnspan=3,
+            padx=4,
+            sticky=tkinter.W)
         search_frame = tkinter.Frame(
             self.widgets.action_area,
-            borderwidth=2,
-            padx=5,
-            pady=5,
-            relief=tkinter.GROOVE)
+            **self.with_border)
         release_label = tkinter.Label(
             search_frame,
             text='Release:',
             justify=tkinter.LEFT)
-        release_label.grid(
-            row=0,
-            column=0,
-            padx=4,
-            sticky=tkinter.E)
+        release_label.grid(row=0, **label_grid)
         release_value = tkinter.Entry(
             search_frame,
             textvariable=self.variables.album,
             width=60,
             justify=tkinter.LEFT)
-        release_value.grid(
-            row=0,
-            column=1,
-            columnspan=3,
-            padx=4,
-            sticky=tkinter.W)
+        release_value.grid(row=0, **value_grid)
         artist_label = tkinter.Label(
             search_frame,
             text='by Artist:',
             justify=tkinter.LEFT)
-        artist_label.grid(
-            row=1,
-            column=0,
-            padx=4,
-            sticky=tkinter.E)
+        artist_label.grid(row=1, **label_grid)
         artist_value = tkinter.Entry(
             search_frame,
             textvariable=self.variables.albumartist,
             width=60,
             justify=tkinter.LEFT)
-        artist_value.grid(
-            row=1,
-            column=1,
-            columnspan=3,
-            padx=4,
-            sticky=tkinter.W)
-        search_frame.grid(
-            padx=4,
-            pady=2,
-            sticky=tkinter.E + tkinter.W)
+        artist_value.grid(row=1, **value_grid)
+        search_frame.grid(**self.grid_fullwidth)
         direct_entry_frame = tkinter.Frame(
             self.widgets.action_area,
-            borderwidth=2,
-            padx=5,
-            pady=5,
-            relief=tkinter.GROOVE)
+            **self.with_border)
         mbid_label = tkinter.Label(
             direct_entry_frame,
             text='MusicBrainz release ID:',
             justify=tkinter.LEFT)
-        mbid_label.grid(
-            row=0,
-            column=0,
-            padx=4,
-            sticky=tkinter.E)
+        mbid_label.grid(row=0, **label_grid)
         mbid_value = tkinter.Entry(
             direct_entry_frame,
             textvariable=self.variables.mbid_entry,
             width=60,
             justify=tkinter.LEFT)
-        mbid_value.grid(
-            row=0,
-            column=1,
-            columnspan=3,
-            padx=4,
-            sticky=tkinter.W)
-        direct_entry_frame.grid(
-            padx=4,
-            pady=2,
-            sticky=tkinter.E + tkinter.W)
-        #
+        mbid_value.grid(row=0, **value_grid)
+        direct_entry_frame.grid(**self.grid_fullwidth)
 
     def panel_select_mb_release(self):
         """Panel with Musicbrainz release selection"""
         select_frame = tkinter.Frame(
             self.widgets.action_area,
-            borderwidth=2,
-            padx=5,
-            pady=5,
-            relief=tkinter.GROOVE)
-        current_row = 0
+            **self.with_border)
+        release_iids = {}
+        self.widgets.release_view = ttk.Treeview(
+            master=select_frame,
+            height=20,
+            selectmode=tkinter.BROWSE,
+            show='tree')
+        self.widgets.release_view.column('#0', width=500)
+        self.widgets.release_view.bind(
+            '<Double-Button-1>', self.open_selected_release)
+        self.widgets.release_view.bind(
+            '<Return>', self.open_selected_release)
         for single_release in self.variables.mb_releases:
-            def show_release(release_id=single_release.id_):
-                """Internal function definition to process
-                the release id in the "real" handler function,
-                compare <https://tkdocs.com/shipman/extra-args.html>.
-                """
-                return open_in_musicbrainz(release_id)
+            release_full_name = '%s – %s' % (
+                single_release.artist_credit,
+                single_release.title)
+            try:
+                parent_iid = release_iids[release_full_name.lower()]
+            except KeyError:
+                parent_iid = self.widgets.release_view.insert(
+                    '',
+                    tkinter.END,
+                    open=True,
+                    text=release_full_name)
+                release_iids[release_full_name.lower()] = parent_iid
             #
-            release_select = tkinter.Radiobutton(
-                select_frame,
-                justify=tkinter.LEFT,
-                text='%s – %s\n%s, %s (%s total tracks)' % (
-                    single_release.artist_credit,
-                    single_release.title,
-                    single_release.date,
+            self.widgets.release_view.insert(
+                parent_iid,
+                tkinter.END,
+                iid=single_release.id_,
+                text='%s, %s – (Score: %.01f%%)' % (
+                    single_release.date or 'unknown date',
                     single_release.media_summary,
-                    single_release.total_tracks),
-                value=single_release.id_,
-                variable=self.variables.release_id)
-            release_select.grid(
-                row=current_row,
-                column=0,
-                padx=4,
-                sticky=tkinter.W)
-            release_show = tkinter.Button(
-                select_frame,
-                text='Show release',
-                command=show_release)
-            release_show.grid(
-                row=current_row,
-                column=1,
-                padx=4,
-                sticky=tkinter.W)
-            if current_row == 0:
-                release_select.select()
+                    single_release.score))
             #
-            current_row += 1
-        select_frame.grid(
-            padx=4,
-            pady=2,
-            sticky=tkinter.E + tkinter.W)
+        #
+        self.widgets.release_view.grid(**self.grid_fullwidth)
+        select_frame.grid(**self.grid_fullwidth)
 
     def __show_panel(self):
         """Show a panel.
@@ -449,10 +510,7 @@ class UserInterface():
         #
         self.widgets.action_area = tkinter.Frame(
             self.main_window,
-            borderwidth=2,
-            padx=5,
-            pady=5,
-            relief=tkinter.GROOVE)
+            **self.with_border)
         try:
             panel_method = getattr(
                 self,
@@ -473,18 +531,13 @@ class UserInterface():
         #
         self.__show_errors()
         panel_method()
-        self.widgets.action_area.grid(
-            padx=4,
-            pady=2,
-            sticky=tkinter.E + tkinter.W)
+        self.widgets.action_area.grid(**self.grid_fullwidth)
         #
         self.widgets.buttons_area = tkinter.Frame(
             self.main_window,
-            borderwidth=2,
-            padx=5,
-            pady=5,
-            relief=tkinter.GROOVE)
+            **self.with_border)
         #
+        buttons_grid = dict(padx=5, pady=5, row=0)
         if self.variables.current_phase in (
                 SELECT_MB_RELEASE,
                 CONFIRM_METADATA,
@@ -500,12 +553,7 @@ class UserInterface():
             text='< Previous',
             command=self.previous_panel,
             state=previous_button_state)
-        previous_button.grid(
-            row=0,
-            column=0,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
+        previous_button.grid(column=0, sticky=tkinter.W, **buttons_grid)
         #
         if self.variables.disable_next_button or \
                 self.variables.current_phase == RENAME_FILES:
@@ -519,48 +567,23 @@ class UserInterface():
             text='> Next',
             command=self.next_panel,
             state=next_button_state)
-        next_button.grid(
-            row=0,
-            column=1,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
+        next_button.grid(column=1, sticky=tkinter.W, **buttons_grid)
         choose_button = tkinter.Button(
             self.widgets.buttons_area,
             text='Choose another release…',
             command=self.choose_local_release)
-        choose_button.grid(
-            row=0,
-            column=2,
-            sticky=tkinter.W,
-            padx=5,
-            pady=5)
+        choose_button.grid(column=2, sticky=tkinter.W, **buttons_grid)
         about_button = tkinter.Button(
             self.widgets.buttons_area,
             text='About…',
             command=self.show_about)
-        about_button.grid(
-            row=0,
-            column=3,
-            sticky=tkinter.E,
-            padx=5,
-            pady=5)
+        about_button.grid(column=3, sticky=tkinter.E, **buttons_grid)
         quit_button = tkinter.Button(
             self.widgets.buttons_area,
             text='Quit',
             command=self.quit)
-        quit_button.grid(
-            row=0,
-            column=4,
-            sticky=tkinter.E,
-            padx=5,
-            pady=5)
-        #
-        self.widgets.buttons_area.grid(
-            padx=4,
-            pady=2,
-            sticky=tkinter.E + tkinter.W)
-        #
+        quit_button.grid(column=4, sticky=tkinter.E, **buttons_grid)
+        self.widgets.buttons_area.grid(**self.grid_fullwidth)
 
     def previous_panel(self):
         """Go to the next panel"""
@@ -706,16 +729,30 @@ class UserInterface():
                 self.variables.disable_next_button = True
                 return
             #
-            # TODO
+            # TODO: ranking and sorting
             #
-            self.variables.mb_releases = [
-                MusicBrainzRelease(single_release)
-                for single_release in query_result['release-list']]
+            score_calcuation = ScoreCalculation(self.variables.release)
+            releases = []
+            for single_release in query_result['release-list']:
+                mb_release = MusicBrainzRelease(single_release)
+                mb_release.score = score_calcuation.calculate_score(
+                    mb_release)
+                releases.append(mb_release)
+            #
+            self.variables.mb_releases = sorted(releases, reverse=True)
         else:
             release_data = musicbrainzngs.get_release_by_id(
                 release_mbid,
                 includes=['media', 'artists', 'recordings', 'artist-credits'])
             self.variables.mb_releases = [MusicBrainzRelease(release_data)]
+        #
+
+    def open_selected_release(self, event=None):
+        """Open a the selected release in MusicBrainz"""
+        try:
+            open_in_musicbrainz(self.widgets.release_view.focus())
+        except ValueError:
+            pass
         #
 
     def rename_files(self):
