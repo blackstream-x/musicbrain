@@ -306,7 +306,7 @@ class ScoreCalculation:
             if tracks_in_mb > local_tracks:
                 track_penalty += 3 * (tracks_in_mb - local_tracks)
             elif tracks_in_mb < local_tracks:
-                track_penalty +=  7 * (local_tracks - tracks_in_mb)
+                track_penalty += 7 * (local_tracks - tracks_in_mb)
             #
         #
         if self.date and mb_release.date != self.date:
@@ -468,28 +468,35 @@ class UserInterface():
             text='… or specify a MusicBrainz release directly by its ID:',
             justify=tkinter.LEFT)
         mbid_label.grid(sticky=tkinter.W, padx=4, pady=2)
-        #mbid_label.grid(row=0, **label_grid)
         mbid_value = tkinter.Entry(
             direct_entry_frame,
             textvariable=self.variables.mbid_entry,
             width=70,
             justify=tkinter.LEFT)
         mbid_value.grid(sticky=tkinter.W, padx=4, pady=2)
-        #mbid_value.grid(row=0, **value_grid)
         direct_entry_frame.grid(**self.grid_fullwidth)
 
     def panel_select_mb_release(self):
         """Panel with Musicbrainz release selection"""
         if not self.variables.mb_releases:
+            self.variables.disable_next_button = True
             return
         #
         select_frame = tkinter.Frame(
             self.widgets.action_area,
             **self.with_border)
         release_iids = {}
+        label = tkinter.Label(
+            select_frame,
+            text='Please select a release and hit the "next" button'
+            ' to continue.\n'
+            'Double-click a release to open its MusicBrainz page'
+            ' in your web browser.',
+            justify=tkinter.LEFT)
+        label.grid(row=0, column=0, columnspan=2)
         self.widgets.release_view = ttk.Treeview(
             master=select_frame,
-            height=20,
+            height=15,
             selectmode=tkinter.BROWSE,
             show='tree')
         self.widgets.release_view.column('#0', width=500)
@@ -521,7 +528,16 @@ class UserInterface():
                     single_release.score))
             #
         #
-        self.widgets.release_view.grid(**self.grid_fullwidth)
+        self.widgets.scroll_vertical = tkinter.Scrollbar(
+            select_frame,
+            orient=tkinter.VERTICAL,
+            command=self.widgets.release_view.yview)
+        self.widgets.release_view['yscrollcommand'] = \
+            self.widgets.scroll_vertical.set
+        self.widgets.release_view.grid(
+            row=1, column=0)
+        self.widgets.scroll_vertical.grid(
+            row=1, column=1, sticky=tkinter.N+tkinter.S)
         select_frame.grid(**self.grid_fullwidth)
 
     def __show_panel(self):
@@ -727,8 +743,8 @@ class UserInterface():
             medium_number=self.variables.release.medium_prefixes_required)
 
     def rollback_select_mb_release(self):
-        """No rollback required here"""
-        ...
+        """Clear releases explicitly"""
+        self.variables.mb_releases.clear()
 
     def select_mb_release(self):
         """Lookup releases in MusicBrainz"""
@@ -793,9 +809,6 @@ class UserInterface():
                     'Missing data: album name or artist are required.')
             #
         #
-        if not self.variables.mb_releases:
-            self.variables.disable_next_button = True
-        #
 
     def open_selected_release(self, event=None):
         """Open a the selected release in MusicBrainz"""
@@ -815,8 +828,8 @@ class UserInterface():
                     track.file_path,
                     track.suggested_filename(
                         include_artist_name=required_includes['artist_name'],
-                        include_medium_number=\
-                            required_includes['medium_number']))
+                        include_medium_number=required_includes[
+                            'medium_number']))
             #
         #
         if renaming_plan:
