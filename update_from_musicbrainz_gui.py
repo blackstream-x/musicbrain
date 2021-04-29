@@ -167,7 +167,6 @@ class MusicBrainzTrack():
         """Set data from a track data structure"""
         self.number = track_data['number']
         self.position = track_data['position']
-        self.length = track_data['length']
         self.title = track_data['recording']['title']
         self.artist_credit = track_data['artist-credit-phrase']
         try:
@@ -186,7 +185,7 @@ class MusicBrainzMedium():
         self.format = medium_data['format']
         self.position = medium_data.get('position')
         self.track_count = medium_data['track-count']
-        self.media = [
+        self.tracks = [
             MusicBrainzTrack(track_data)
             for track_data in medium_data['track-list']]
 
@@ -232,11 +231,6 @@ class MusicBrainzRelease():
         #
         return ' + '.join(output_list)
 
-    @property
-    def total_tracks(self):
-        """Sum of media track counts"""
-        return sum(single_medium.track_count for single_medium in self.media)
-
     def __eq__(self, other):
         """Rich comparison: equals"""
         return self.id_ == other.id_
@@ -244,6 +238,104 @@ class MusicBrainzRelease():
     def __gt__(self, other):
         """Rich comparison: greater than"""
         return self.score > other.score
+
+
+class TrackMetadataChanges:
+
+    """Metadata changes for a single track"""
+
+    extra_attributes = ('medium_number', 'sided_position',
+                        'total_tracks', 'track_number')
+
+    def __init__(self, track, mb_data):
+        """..."""
+        self.__changes = {}
+        self.__use_value = {}
+        self.__locked = False
+        self.track = track
+        self.update_changes(mb_data[track.medium_number][track.track_number])
+        self.keys = self.__changes.keys
+
+    def update_changes(self, mb_track_data):
+        """Update the changes dict"""
+        self.__changes.clear()
+        for (key, new_value) in sorted(mb_track_data['metadata'].items()):
+            old_value = self.track[key]
+            if new_value != old_value:
+                self.__changes[key] = (old_value, new_value)
+                self.__use_value[key] = 1
+            #
+        #
+        for key in sorted(self.extra_attributes):
+            old_value = getattr(self.track, key)
+            new_value = getattr(mb_track_data, key)
+            if new_value and new_value != old_value:
+                self.__changes[key] = (old_value, new_value)
+                self.__use_value[key] = 1
+            #
+        #
+
+    def toggle_source(self, key):
+        """Toggle the source of the item with the given key"""
+        if self.__locked:
+            raise ValueError('Locked!')
+        #
+        self.__use_value[key] = 1 - self.__use_value[key]
+
+    def display(self, key):
+        """Display what would happen"""
+        value = self.__changes[key][self.__use_value[key]]
+        if self.__use_value[key]:
+            return '%s will be changed to %r' % (key, value)
+        #
+        return '%s will be left at %r' % (key, value)
+
+    # TODO: apply changes to the track, lock and create fallback
+
+
+class MusicBrainzMetadata:
+
+    """Metadata from a MusicBrainz release"""
+
+    def __init__(self, mb_release):
+        """Store some data from the release"""
+        release_metadata = dict(
+            ALBUM=mb_release.title,
+            ALBUMARTIST=mb_release.artist_credit)
+        try:
+            release_metadata['DATE'] = mb_release.date[:4]
+        except TypeError:
+            pass
+        #
+        self.media = {}
+        for (medium_index, mb_medium) in enumerate(mb_release.media):
+            medium_number = medium_index + 1
+            medium_track_count = mb_medium.track_count
+            tracks = {}
+            for (track_index, mb_track) in enumerate(mb_medium.tracks):
+                track_number = track_index + 1
+                current_track = dict(
+                    total_tracks=medium_track_count,
+                    medium_number=medium_number,
+                    track_number=track_number,
+                    metadata=dict(
+                        TITLE=mb_track.title,
+                        ARTIST=mb_track.artist_credit))
+                current_track['metadata'].update(release_metadata)
+                try:
+                    current_track['sided_position'] = \
+                        audio_metadata.SidedTrackPosition(mb_track.number)
+                except ValueError:
+                    pass
+                #
+                tracks[track_number] = current_track
+            #
+            self.media[medium_number] = tracks
+        #
+
+    def __getitem__(self, name):
+        """Return the medium (dict-style access)"""
+        return self.media[name]
 
 
 class ScoreCalculation:

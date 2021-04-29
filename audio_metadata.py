@@ -185,6 +185,7 @@ class Track(SortableHashableMixin):
     """Object exposing an audio track's metadata"""
 
     fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
+    fs_track_and_total = '{0.track_number:02d}/{0.total_tracks:02d}'
     prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
     managed_tags = {
         'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
@@ -334,11 +335,25 @@ class Track(SortableHashableMixin):
         #
         return prefix + stem + self.file_path.suffix
 
+    def update_positions(self):
+        """Update positions (DISCNUMBER and TRACKNUMBER)
+        from self.medium_number, self.track_number
+        and self.total_tracks
+        """
+        if self.total_tracks:
+            tracknumber = self.fs_track_and_total.format(self)
+        else:
+            tracknumber = format(self.track_number, '02d')
+        #
+        self.__tags_changed |= self.__set_tags(
+            TRACKNUMBER=tracknumber,
+            DISCNUMBER=str(self.medium_number))
+
     def update_tags(self, **tags_map):
         """Update the provided tags given as strings
         and set the __tags_changed flag
         """
-        self.__tags_changed = self.__set_tags(**tags_map)
+        self.__tags_changed |= self.__set_tags(**tags_map)
 
     def __set_tags(self, **tags_map):
         """Set the provided tags given as strings.
@@ -350,6 +365,7 @@ class Track(SortableHashableMixin):
                 new_value = tags_map.pop(tag_name)
             except KeyError:
                 continue
+            #
             old_value = self[tag_name]
             if new_value == old_value:
                 continue
