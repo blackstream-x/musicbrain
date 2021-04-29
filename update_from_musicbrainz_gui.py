@@ -195,7 +195,7 @@ class MusicBrainzRelease():
 
     """Keep data from a MusicBrainz release"""
 
-    def __init__(self, release_data):
+    def __init__(self, release_data, score_calculation=None):
         """Set data from a release query result"""
         self.id_ = release_data['id']
         self.date = release_data.get('date')
@@ -204,7 +204,10 @@ class MusicBrainzRelease():
         self.media = [
             MusicBrainzMedium(medium_data)
             for medium_data in release_data['medium-list']]
-        self.score = 0.0
+        self.score = 0
+        if score_calculation:
+            self.score = score_calculation.get_score_for(self)
+        #
 
     @property
     def media_summary(self):
@@ -247,13 +250,13 @@ class ScoreCalculation:
 
     """Object calculating how good a MusicBrainzRelease
     matches an audio_metadata.Release
-    by comparing number of media, tracks per medium,
-    TODO: date,
-    …
+    by comparing number of media, tracks per medium and date.
     """
 
     def __init__(self, release):
-        """..."""
+        """Store the release object and a date if it is unique
+        over all contained tracks
+        """
         self.release = release
         self.date = None
         collected_dates = set()
@@ -271,28 +274,39 @@ class ScoreCalculation:
             self.date = collected_dates.pop()
         #
 
-    def calculate_score(self, mb_release):
-        """Return a float representing how close
-        themusicbrainz release matches self.release
+    def get_score_for(self, mb_release):
+        """Take a half-educated guess
+        about the similarity of the given MusicBrainz release
+        and self.release, comparing numer of media, number of tracks,
+        and the date if possible.
+        Return an integer. 100 is the highest possible score,
+        but there is no bottom limit.
         """
-        score = 100.0
-        if len(mb_release.media) < self.release.effective_media_count:
-            score = score - 5 * (self.release.effective_media_count
-                                 - len(mb_release.media))
+        media_penalty = 0
+        track_penalty = 0
+        date_penalty = 0
+        #
+        media_in_mb = len(mb_release.media)
+        local_media = self.release.effective_media_count
+        media_penalty = 0
+        if media_in_mb < local_media:
+            media_penalty = 10 * (local_media - media_in_mb)
+        elif media_in_mb > local_media:
+            media_penalty = media_in_mb - local_media
         #
         mb_media = [None] + mb_release.media
         for medium_number in self.release.medium_numbers:
             try:
                 tracks_in_mb = mb_media[medium_number].track_count
             except IndexError:
-                score = score - 5
+                track_penalty += 10
                 continue
             #
             local_tracks = self.release[medium_number].effective_total_tracks
             if tracks_in_mb > local_tracks:
-                score = score - 1.5 * (tracks_in_mb - local_tracks)
+                track_penalty += 3 * (tracks_in_mb - local_tracks)
             elif tracks_in_mb < local_tracks:
-                score = score - 3.5 * (local_tracks - tracks_in_mb)
+                track_penalty +=  7 * (local_tracks - tracks_in_mb)
             #
         #
         if self.date and mb_release.date != self.date:
@@ -301,15 +315,15 @@ class ScoreCalculation:
                 try:
                     difference = int(self.date) - int(comparable_date)
                 except ValueError:
-                    score = score - 7.5
+                    date_penalty = 15
                 else:
-                    score = score - 0.5 * abs(difference)
+                    date_penalty = abs(difference)
                 #
             else:
-                score = score - 7.5
+                date_penalty = 15
             #
         #
-        return score
+        return 100 - media_penalty - track_penalty - date_penalty
 
 
 class UserInterface():
@@ -325,6 +339,8 @@ class UserInterface():
         padx=4,
         pady=2,
         sticky=tkinter.E + tkinter.W)
+
+    # pylint: disable=attribute-defined-outside-init
 
     # TODO (also see https://stackoverflow.com/a/29126154):
     # 1. Show window with Album name and artist name entries
@@ -368,7 +384,8 @@ class UserInterface():
             directory_path=directory_path,
             disable_next_button=False,
             errors=[],
-            mb_releases=[])
+            mb_releases=[],
+            selected_mb_release=None)
         self.choose_local_release(
             keep_existing=True,
             quit_on_empty_choice=True)
@@ -414,47 +431,58 @@ class UserInterface():
         search_frame = tkinter.Frame(
             self.widgets.action_area,
             **self.with_border)
+        search_label = tkinter.Label(
+            search_frame,
+            text='Search the release in MusicBrainz'
+            ' by the following data:',
+            justify=tkinter.LEFT)
+        search_label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
         release_label = tkinter.Label(
             search_frame,
-            text='Release:',
+            text='Release title:',
             justify=tkinter.LEFT)
-        release_label.grid(row=0, **label_grid)
+        release_label.grid(row=1, **label_grid)
         release_value = tkinter.Entry(
             search_frame,
             textvariable=self.variables.album,
             width=60,
             justify=tkinter.LEFT)
-        release_value.grid(row=0, **value_grid)
+        release_value.grid(row=1, **value_grid)
         artist_label = tkinter.Label(
             search_frame,
-            text='by Artist:',
+            text='Release Artist:',
             justify=tkinter.LEFT)
-        artist_label.grid(row=1, **label_grid)
+        artist_label.grid(row=2, **label_grid)
         artist_value = tkinter.Entry(
             search_frame,
             textvariable=self.variables.albumartist,
             width=60,
             justify=tkinter.LEFT)
-        artist_value.grid(row=1, **value_grid)
+        artist_value.grid(row=2, **value_grid)
         search_frame.grid(**self.grid_fullwidth)
         direct_entry_frame = tkinter.Frame(
             self.widgets.action_area,
             **self.with_border)
         mbid_label = tkinter.Label(
             direct_entry_frame,
-            text='MusicBrainz release ID:',
+            text='… or specify a MusicBrainz release directly by its ID:',
             justify=tkinter.LEFT)
-        mbid_label.grid(row=0, **label_grid)
+        mbid_label.grid(sticky=tkinter.W, padx=4, pady=2)
+        #mbid_label.grid(row=0, **label_grid)
         mbid_value = tkinter.Entry(
             direct_entry_frame,
             textvariable=self.variables.mbid_entry,
-            width=60,
+            width=70,
             justify=tkinter.LEFT)
-        mbid_value.grid(row=0, **value_grid)
+        mbid_value.grid(sticky=tkinter.W, padx=4, pady=2)
+        #mbid_value.grid(row=0, **value_grid)
         direct_entry_frame.grid(**self.grid_fullwidth)
 
     def panel_select_mb_release(self):
         """Panel with Musicbrainz release selection"""
+        if not self.variables.mb_releases:
+            return
+        #
         select_frame = tkinter.Frame(
             self.widgets.action_area,
             **self.with_border)
@@ -487,7 +515,7 @@ class UserInterface():
                 parent_iid,
                 tkinter.END,
                 iid=single_release.id_,
-                text='%s, %s – (Score: %.01f%%)' % (
+                text='%s, %s – (Score: %s)' % (
                     single_release.date or 'unknown date',
                     single_release.media_summary,
                     single_release.score))
@@ -529,6 +557,11 @@ class UserInterface():
         else:
             self.variables.current_panel = self.variables.current_phase
         #
+        directory_display = tkinter.Label(
+            self.widgets.action_area,
+            text='Selected directory: %r' % self.variables.directory_path.name,
+            justify=tkinter.LEFT)
+        directory_display.grid(sticky=tkinter.W, padx=4, pady=2)
         self.__show_errors()
         panel_method()
         self.widgets.action_area.grid(**self.grid_fullwidth)
@@ -699,11 +732,38 @@ class UserInterface():
 
     def select_mb_release(self):
         """Lookup releases in MusicBrainz"""
-        try:
-            release_mbid = extract_mbid(self.variables.mbid_entry.get())
-        except ValueError:
-            # No (valid) MBID, get (and maybe filter)
-            # releases from musicbrainz
+        score_calculation = ScoreCalculation(self.variables.release)
+        self.variables.mb_releases.clear()
+        mbid_value = self.variables.mbid_entry.get()
+        if mbid_value:
+            try:
+                release_mbid = extract_mbid(mbid_value)
+            except ValueError:
+                self.variables.errors.append(
+                    '%r does not contain a valid'
+                    ' MusicBrainz ID.' % mbid_value)
+            else:
+                try:
+                    release_data = musicbrainzngs.get_release_by_id(
+                        release_mbid,
+                        includes=[
+                            'media',
+                            'artists',
+                            'recordings',
+                            'artist-credits'])
+                except musicbrainzngs.musicbrainz.ResponseError:
+                    self.variables.errors.append(
+                        'No release in MusicBrainz with ID %r.' % release_mbid)
+                else:
+                    self.variables.selected_mb_release = MusicBrainzRelease(
+                        release_data['release'],
+                        score_calculation=score_calculation)
+                    self.variables.mb_releases.append(
+                        self.variables.selected_mb_release)
+                #
+            #
+        else:
+            # Get releases from musicbrainz
             album = self.variables.album.get()
             albumartist = self.variables.albumartist.get()
             search_criteria = []
@@ -713,38 +773,28 @@ class UserInterface():
             if albumartist:
                 search_criteria.append('artist:"%s"' % albumartist)
             #
-            if not search_criteria:
+            if search_criteria:
+                query_result = musicbrainzngs.search_releases(
+                    query=' AND '.join(search_criteria))
+                #
+                releases = [
+                    MusicBrainzRelease(
+                        single_release,
+                        score_calculation=score_calculation)
+                    for single_release in query_result['release-list']]
+                self.variables.mb_releases.extend(
+                    sorted(releases, reverse=True))
+                if not self.variables.mb_releases:
+                    self.variables.errors.append(
+                        'No matching releases found.')
+                #
+            else:
                 self.variables.errors.append(
                     'Missing data: album name or artist are required.')
-                self.variables.disable_next_button = True
-                return
             #
-            query_result = musicbrainzngs.search_releases(
-                query=' AND '.join(search_criteria))
-            #
-            release_count = query_result['release-count']
-            if not release_count:
-                self.variables.errors.append(
-                    'No matching releases found.')
-                self.variables.disable_next_button = True
-                return
-            #
-            # TODO: ranking and sorting
-            #
-            score_calcuation = ScoreCalculation(self.variables.release)
-            releases = []
-            for single_release in query_result['release-list']:
-                mb_release = MusicBrainzRelease(single_release)
-                mb_release.score = score_calcuation.calculate_score(
-                    mb_release)
-                releases.append(mb_release)
-            #
-            self.variables.mb_releases = sorted(releases, reverse=True)
-        else:
-            release_data = musicbrainzngs.get_release_by_id(
-                release_mbid,
-                includes=['media', 'artists', 'recordings', 'artist-credits'])
-            self.variables.mb_releases = [MusicBrainzRelease(release_data)]
+        #
+        if not self.variables.mb_releases:
+            self.variables.disable_next_button = True
         #
 
     def open_selected_release(self, event=None):
