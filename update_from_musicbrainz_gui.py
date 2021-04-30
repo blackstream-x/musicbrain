@@ -115,6 +115,20 @@ def open_in_musicbrainz(release_id):
 #
 
 
+class MediumNotFound(Exception):
+
+    """Raised if the specified medium is not found"""
+
+    ...
+
+
+class TrackNotFound(Exception):
+
+    """Raised if the specified track is not found"""
+
+    ...
+
+
 class Namespace(dict):
 
     """A dict subclass that exposes its items as attributes.
@@ -253,7 +267,12 @@ class TrackMetadataChanges:
         self.__use_value = {}
         self.__locked = False
         self.track = track
-        self.update_changes(mb_data[track.medium_number][track.track_number])
+        mb_medium = mb_data[track.medium_number]
+        try:
+            self.update_changes(mb_medium[track.track_number])
+        except KeyError as error:
+            raise TrackNotFound from error
+        #
         self.keys = self.__changes.keys
 
     def update_changes(self, mb_track_data):
@@ -335,7 +354,11 @@ class MusicBrainzMetadata:
 
     def __getitem__(self, name):
         """Return the medium (dict-style access)"""
-        return self.media[name]
+        try:
+            return self.media[name]
+        except KeyError as error:
+            raise MediumNotFound from error
+        #
 
 
 class ScoreCalculation:
