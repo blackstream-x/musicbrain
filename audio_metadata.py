@@ -282,8 +282,8 @@ class Track(SortableHashableMixin):
         """Save the tags to the file and
         return a dict of changes
         """
+        changes = {}
         if self.__tags_changed:
-            changes = {}
             file_metadata = taglib.File(str(self.file_path))
             for tag_name in self.managed_tags:
                 try:
