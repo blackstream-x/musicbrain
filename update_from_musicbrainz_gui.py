@@ -11,9 +11,11 @@ Update metadata from a MusicBrainz release
 """
 
 
-import collections
-import json
-import logging
+# =============================================================================
+# import collections
+# import json
+# import logging
+# =============================================================================
 import os
 import pathlib
 import re
@@ -501,36 +503,155 @@ class UserInterface():
             errors=[],
             mb_releases=[],
             selected_mb_release=None)
-        self.choose_local_release(
+        self.do_choose_local_release(
             keep_existing=True,
             quit_on_empty_choice=True)
         self.main_window.mainloop()
 
-    def __show_errors(self):
-        """Show errors if there are any"""
-        if self.variables.errors:
-            errors_frame = tkinter.Frame(
-                self.widgets.action_area,
-                **self.with_border)
-            for message in self.variables.errors:
-                error_value = tkinter.Label(
-                    errors_frame,
-                    text=message,
-                    justify=tkinter.LEFT)
-                error_value.grid(
-                    padx=4,
-                    sticky=tkinter.W)
+    def do_choose_local_release(self,
+                                keep_existing=False,
+                                preset_path=None,
+                                quit_on_empty_choice=False):
+        """Choose a release via file dialog"""
+        if preset_path:
+            if not preset_path.is_dir():
+                preset_path = preset_path.parent
             #
-            self.variables.errors.clear()
-            errors_frame.grid(**self.grid_fullwidth)
+        else:
+            preset_path = self.variables.directory_path
+        #
+        while True:
+            if not keep_existing or self.variables.directory_path is None:
+                selected_directory = filedialog.askdirectory(
+                    initialdir=str(preset_path) or os.getcwd())
+                if not selected_directory:
+                    if quit_on_empty_choice:
+                        self.quit()
+                    #
+                    return
+                #
+                self.variables.directory_path = pathlib.Path(
+                    selected_directory)
+            #
+            try:
+                self.variables.release = audio_metadata.get_release_from_path(
+                    self.variables.directory_path)
+            except ValueError as error:
+                messagebox.showerror(
+                    'Error while reading release',
+                    str(error),
+                    icon=messagebox.ERROR)
+                keep_existing = False
+                continue
+            #
+            self.variables.current_panel = CHOOSE_LOCAL_RELEASE
+            self.next_panel()
+            break
         #
 
-    def local_release_data(self):
+    def do_local_release_data(self):
         """Set local release data"""
         self.variables.album.set(
             self.variables.release.album or '')
         self.variables.albumartist.set(
             self.variables.release.albumartist or '')
+
+    def do_select_mb_release(self):
+        """Lookup releases in MusicBrainz"""
+        score_calculation = ScoreCalculation(self.variables.release)
+        self.variables.mb_releases.clear()
+        mbid_value = self.variables.mbid_entry.get()
+        if mbid_value:
+            try:
+                release_mbid = extract_mbid(mbid_value)
+            except ValueError:
+                self.variables.errors.append(
+                    '%r does not contain a valid'
+                    ' MusicBrainz ID.' % mbid_value)
+            else:
+                try:
+                    release_data = musicbrainzngs.get_release_by_id(
+                        release_mbid,
+                        includes=[
+                            'media',
+                            'artists',
+                            'recordings',
+                            'artist-credits'])
+                except musicbrainzngs.musicbrainz.ResponseError:
+                    self.variables.errors.append(
+                        'No release in MusicBrainz with ID %r.' % release_mbid)
+                else:
+                    self.variables.selected_mb_release = MusicBrainzRelease(
+                        release_data['release'],
+                        score_calculation=score_calculation)
+                    self.variables.mb_releases.append(
+                        self.variables.selected_mb_release)
+                #
+            #
+        else:
+            # Get releases from musicbrainz
+            album = self.variables.album.get()
+            albumartist = self.variables.albumartist.get()
+            search_criteria = []
+            if album:
+                search_criteria.append('"%s"' % album)
+            #
+            if albumartist:
+                search_criteria.append('artist:"%s"' % albumartist)
+            #
+            if search_criteria:
+                query_result = musicbrainzngs.search_releases(
+                    query=' AND '.join(search_criteria))
+                #
+                releases = [
+                    MusicBrainzRelease(
+                        single_release,
+                        score_calculation=score_calculation)
+                    for single_release in query_result['release-list']]
+                self.variables.mb_releases.extend(
+                    sorted(releases, reverse=True))
+                if not self.variables.mb_releases:
+                    self.variables.errors.append(
+                        'No matching releases found.')
+                #
+            else:
+                self.variables.errors.append(
+                    'Missing data: album name or artist are required.')
+            #
+        #
+
+    def __get_renaming_options(self):
+        """Return renaming options"""
+        return dict(
+            artist_name=False,
+            medium_number=self.variables.release.medium_prefixes_required)
+
+    def do_rename_files(self):
+        """Rename files"""
+        required_includes = self.__get_renaming_options()
+        renaming_plan = safer_mass_rename.RenamingPlan()
+        for medium in self.variables.release.media_list:
+            for track in medium.tracks_list:
+                renaming_plan.add(
+                    track.file_path,
+                    track.suggested_filename(
+                        include_artist_name=required_includes['artist_name'],
+                        include_medium_number=required_includes[
+                            'medium_number']))
+            #
+        #
+        if renaming_plan:
+            gui_commons.ConfirmRenameDialog(
+                self.main_window,
+                renaming_plan)
+            # Refresh release and medium information (?)
+            # self.choose_release(keep_existing=True)
+        else:
+            messagebox.showinfo(
+                'No renaming necessary',
+                'All tracks already have the desired name.',
+                icon=messagebox.INFO)
+        #
 
     def panel_local_release_data(self):
         """Show the local release’s title and artist"""
@@ -655,6 +776,104 @@ class UserInterface():
             row=1, column=1, sticky=tkinter.N+tkinter.S)
         select_frame.grid(**self.grid_fullwidth)
 
+    def next_panel(self):
+        """Go to the next panel"""
+        next_index = PHASES.index(self.variables.current_panel) + 1
+        try:
+            next_phase = PHASES[next_index]
+        except IndexError:
+            self.variables.errors.append(
+                'Phase number #%s out of range' % next_index)
+        #
+        try:
+            action_method = getattr(self, 'do_%s' % next_phase)
+        except AttributeError:
+            self.variables.errors.append(
+                'Action method for phase #%s (%r)'
+                ' has not been defined yet' % (next_index, next_phase))
+        except NotImplementedError:
+            self.variables.errors.append(
+                'Action method for phase #%s (%r)'
+                ' has not been implemented yet' % (next_index, next_phase))
+        else:
+            self.variables.current_phase = next_phase
+            action_method()
+        #
+        self.__show_panel()
+
+    def open_selected_release(self, event=None):
+        """Open a the selected release in MusicBrainz"""
+        del event
+        try:
+            open_in_musicbrainz(self.widgets.release_view.focus())
+        except ValueError:
+            pass
+        #
+
+    def previous_panel(self):
+        """Go to the next panel"""
+        phase_index = PHASES.index(self.variables.current_panel)
+        try:
+            rollback_method = getattr(
+                self,
+                'rollback_%s' % self.variables.current_panel)
+        except AttributeError:
+            self.variables.errors.append(
+                'Rollback method for phase #%s (%r)'
+                ' has not been defined yet' % (
+                    phase_index, self.variables.current_panel))
+        except NotImplementedError:
+            self.variables.errors.append(
+                'Rollback method for phase #%s (%r)'
+                ' has not been implemented yet' % (
+                    phase_index, self.variables.current_panel))
+        else:
+            self.variables.current_phase = PHASES[phase_index - 1]
+            rollback_method()
+        #
+        self.__show_panel()
+
+    def quit(self, event=None):
+        """Exit the application"""
+        del event
+        self.main_window.destroy()
+
+    def rollback_select_mb_release(self):
+        """Clear releases explicitly"""
+        self.variables.mb_releases.clear()
+
+    def show_about(self):
+        """Show information about the application
+        in a modal dialog
+        """
+        gui_commons.InfoDialog(
+            self.main_window,
+            (SCRIPT_NAME,
+             'Version: {0}\nProject homepage: {1}'.format(
+                VERSION, HOMEPAGE)),
+            ('License:', LICENSE_TEXT),
+            title='About…')
+        #
+
+    def __show_errors(self):
+        """Show errors if there are any"""
+        if self.variables.errors:
+            errors_frame = tkinter.Frame(
+                self.widgets.action_area,
+                **self.with_border)
+            for message in self.variables.errors:
+                error_value = tkinter.Label(
+                    errors_frame,
+                    text=message,
+                    justify=tkinter.LEFT)
+                error_value.grid(
+                    padx=4,
+                    sticky=tkinter.W)
+            #
+            self.variables.errors.clear()
+            errors_frame.grid(**self.grid_fullwidth)
+        #
+
     def __show_panel(self):
         """Show a panel.
         Add the "Previous", "Next", "Choose another relase",
@@ -735,7 +954,7 @@ class UserInterface():
         choose_button = tkinter.Button(
             self.widgets.buttons_area,
             text='Choose another release…',
-            command=self.choose_local_release)
+            command=self.do_choose_local_release)
         choose_button.grid(column=2, sticky=tkinter.W, **buttons_grid)
         about_button = tkinter.Button(
             self.widgets.buttons_area,
@@ -748,222 +967,6 @@ class UserInterface():
             command=self.quit)
         quit_button.grid(column=4, sticky=tkinter.E, **buttons_grid)
         self.widgets.buttons_area.grid(**self.grid_fullwidth)
-
-    def previous_panel(self):
-        """Go to the next panel"""
-        phase_index = PHASES.index(self.variables.current_panel)
-        try:
-            rollback_method = getattr(
-                self,
-                'rollback_%s' % self.variables.current_panel)
-        except AttributeError:
-            self.variables.errors.append(
-                'Rollback method for phase #%s (%r)'
-                ' has not been defined yet' % (
-                    phase_index, self.variables.current_panel))
-        except NotImplementedError:
-            self.variables.errors.append(
-                'Rollback method for phase #%s (%r)'
-                ' has not been implemented yet' % (
-                    phase_index, self.variables.current_panel))
-        else:
-            self.variables.current_phase = PHASES[phase_index - 1]
-            rollback_method()
-        #
-        self.__show_panel()
-
-    def next_panel(self):
-        """Go to the next panel"""
-        next_index = PHASES.index(self.variables.current_panel) + 1
-        try:
-            next_phase = PHASES[next_index]
-        except IndexError:
-            self.variables.errors.append(
-                'Phase number #%s out of range' % next_index)
-        #
-        try:
-            action_method = getattr(self, next_phase)
-        except AttributeError:
-            self.variables.errors.append(
-                'Action method for phase #%s (%r)'
-                ' has not been defined yet' % (next_index, next_phase))
-        except NotImplementedError:
-            self.variables.errors.append(
-                'Action method for phase #%s (%r)'
-                ' has not been implemented yet' % (next_index, next_phase))
-        else:
-            self.variables.current_phase = next_phase
-            action_method()
-        #
-        self.__show_panel()
-
-    def choose_local_release(self,
-                             keep_existing=False,
-                             preset_path=None,
-                             quit_on_empty_choice=False):
-        """Choose a release via file dialog"""
-        if preset_path:
-            if not preset_path.is_dir():
-                preset_path = preset_path.parent
-            #
-        else:
-            preset_path = self.variables.directory_path
-        #
-        while True:
-            if not keep_existing or self.variables.directory_path is None:
-                selected_directory = filedialog.askdirectory(
-                    initialdir=str(preset_path) or os.getcwd())
-                if not selected_directory:
-                    if quit_on_empty_choice:
-                        self.quit()
-                    #
-                    return
-                #
-                self.variables.directory_path = pathlib.Path(
-                    selected_directory)
-            #
-            try:
-                self.variables.release = audio_metadata.get_release_from_path(
-                    self.variables.directory_path)
-            except ValueError as error:
-                messagebox.showerror(
-                    'Error while reading release',
-                    str(error),
-                    icon=messagebox.ERROR)
-                keep_existing = False
-                continue
-            #
-            self.variables.current_panel = CHOOSE_LOCAL_RELEASE
-            self.next_panel()
-            break
-        #
-
-    def show_about(self):
-        """Show information about the application
-        in a modal dialog
-        """
-        gui_commons.InfoDialog(
-            self.main_window,
-            (SCRIPT_NAME,
-             'Version: {0}\nProject homepage: {1}'.format(
-                VERSION, HOMEPAGE)),
-            ('License:', LICENSE_TEXT),
-            title='About…')
-        #
-
-    def get_renaming_options(self):
-        """Return renaming options"""
-        return dict(
-            artist_name=False,
-            medium_number=self.variables.release.medium_prefixes_required)
-
-    def rollback_select_mb_release(self):
-        """Clear releases explicitly"""
-        self.variables.mb_releases.clear()
-
-    def select_mb_release(self):
-        """Lookup releases in MusicBrainz"""
-        score_calculation = ScoreCalculation(self.variables.release)
-        self.variables.mb_releases.clear()
-        mbid_value = self.variables.mbid_entry.get()
-        if mbid_value:
-            try:
-                release_mbid = extract_mbid(mbid_value)
-            except ValueError:
-                self.variables.errors.append(
-                    '%r does not contain a valid'
-                    ' MusicBrainz ID.' % mbid_value)
-            else:
-                try:
-                    release_data = musicbrainzngs.get_release_by_id(
-                        release_mbid,
-                        includes=[
-                            'media',
-                            'artists',
-                            'recordings',
-                            'artist-credits'])
-                except musicbrainzngs.musicbrainz.ResponseError:
-                    self.variables.errors.append(
-                        'No release in MusicBrainz with ID %r.' % release_mbid)
-                else:
-                    self.variables.selected_mb_release = MusicBrainzRelease(
-                        release_data['release'],
-                        score_calculation=score_calculation)
-                    self.variables.mb_releases.append(
-                        self.variables.selected_mb_release)
-                #
-            #
-        else:
-            # Get releases from musicbrainz
-            album = self.variables.album.get()
-            albumartist = self.variables.albumartist.get()
-            search_criteria = []
-            if album:
-                search_criteria.append('"%s"' % album)
-            #
-            if albumartist:
-                search_criteria.append('artist:"%s"' % albumartist)
-            #
-            if search_criteria:
-                query_result = musicbrainzngs.search_releases(
-                    query=' AND '.join(search_criteria))
-                #
-                releases = [
-                    MusicBrainzRelease(
-                        single_release,
-                        score_calculation=score_calculation)
-                    for single_release in query_result['release-list']]
-                self.variables.mb_releases.extend(
-                    sorted(releases, reverse=True))
-                if not self.variables.mb_releases:
-                    self.variables.errors.append(
-                        'No matching releases found.')
-                #
-            else:
-                self.variables.errors.append(
-                    'Missing data: album name or artist are required.')
-            #
-        #
-
-    def open_selected_release(self, event=None):
-        """Open a the selected release in MusicBrainz"""
-        try:
-            open_in_musicbrainz(self.widgets.release_view.focus())
-        except ValueError:
-            pass
-        #
-
-    def rename_files(self):
-        """Rename files"""
-        required_includes = self.get_renaming_options()
-        renaming_plan = safer_mass_rename.RenamingPlan()
-        for medium in self.variables.release.media_list:
-            for track in medium.tracks_list:
-                renaming_plan.add(
-                    track.file_path,
-                    track.suggested_filename(
-                        include_artist_name=required_includes['artist_name'],
-                        include_medium_number=required_includes[
-                            'medium_number']))
-            #
-        #
-        if renaming_plan:
-            gui_commons.ConfirmRenameDialog(
-                self.main_window,
-                renaming_plan)
-            # Refresh release and medium information (?)
-            # self.choose_release(keep_existing=True)
-        else:
-            messagebox.showinfo(
-                'No renaming necessary',
-                'All tracks already have the desired name.',
-                icon=messagebox.INFO)
-        #
-
-    def quit(self, event=None):
-        """Exit the application"""
-        del event
-        self.main_window.destroy()
 
 
 #
