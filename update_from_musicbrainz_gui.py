@@ -485,24 +485,28 @@ class UserInterface():
         self.main_window = tkinter.Tk()
         self.main_window.title(MAIN_WINDOW_TITLE)
         musicbrainzngs.set_useragent(SCRIPT_NAME, VERSION, contact=HOMEPAGE)
-        self.widgets = Namespace(
-            action_area=None,
-            buttons_area=None,
-            releases_view=None,
-            scroll_vertical=None)
         self.variables = Namespace(
             mbid_entry=tkinter.StringVar(),
             album=tkinter.StringVar(),
             albumartist=tkinter.StringVar(),
             release_id=tkinter.StringVar(),
-            release=None,
+            local_release=None,
             current_phase=CHOOSE_LOCAL_RELEASE,
             current_panel=None,
             directory_path=directory_path,
             disable_next_button=False,
             errors=[],
             mb_releases=[],
-            selected_mb_release=None)
+            selected_mb_release=None,
+            metadata_changes={},
+            metadata_lookup={},
+            )
+        self.widgets = Namespace(
+            action_area=None,
+            buttons_area=None,
+            metadata_view=None,
+            releases_view=None,
+            scroll_vertical=None)
         self.do_choose_local_release(
             keep_existing=True,
             quit_on_empty_choice=True)
@@ -534,8 +538,9 @@ class UserInterface():
                     selected_directory)
             #
             try:
-                self.variables.release = audio_metadata.get_release_from_path(
-                    self.variables.directory_path)
+                self.variables.local_release = \
+                    audio_metadata.get_release_from_path(
+                        self.variables.directory_path)
             except ValueError as error:
                 messagebox.showerror(
                     'Error while reading release',
@@ -552,13 +557,13 @@ class UserInterface():
     def do_local_release_data(self):
         """Set local release data"""
         self.variables.album.set(
-            self.variables.release.album or '')
+            self.variables.local_release.album or '')
         self.variables.albumartist.set(
-            self.variables.release.albumartist or '')
+            self.variables.local_release.albumartist or '')
 
     def do_select_mb_release(self):
         """Lookup releases in MusicBrainz"""
-        score_calculation = ScoreCalculation(self.variables.release)
+        score_calculation = ScoreCalculation(self.variables.local_release)
         self.variables.mb_releases.clear()
         mbid_value = self.variables.mbid_entry.get()
         if mbid_value:
@@ -620,17 +625,68 @@ class UserInterface():
             #
         #
 
+    def do_confirm_metadata(self):
+        """Fetch data for the selected release"""
+        try:
+            release_mbid = extract_mbid(self.widgets.release_view.focus())
+        except ValueError:
+            self.variables.errors.append(
+                'No release selected.')
+            self.variables.disable_next_button = True
+            return
+        #
+        # Fetch data from MB only if they are noth here yet
+        if not self.variables.selected_mb_release \
+                or self.variables.selected_mb_release.id_ != release_mbid:
+            try:
+                release_data = musicbrainzngs.get_release_by_id(
+                    release_mbid,
+                    includes=[
+                        'media',
+                        'artists',
+                        'recordings',
+                        'artist-credits'])
+            except musicbrainzngs.musicbrainz.ResponseError:
+                self.variables.errors.append(
+                    'No release in MusicBrainz with ID %r.' % release_mbid)
+                self.variables.disable_next_button = True
+                return
+            else:
+                self.variables.selected_mb_release = MusicBrainzRelease(
+                    release_data['release'])
+            #
+        #
+        # Build map of metadata changes per track
+        mb_metadata = MusicBrainzMetadata(self.variables.selected_mb_release)
+        self.variables.metadata_changes.clear()
+        for medium in self.variables.local_release.media_list:
+            for track in medium.tracks_list:
+                try:
+                    self.variables.metadata_changes[track.file_path.name] = \
+                        TrackMetadataChanges(track, mb_metadata)
+                except (MediumNotFound, TrackNotFound):
+                    pass
+                #
+            #
+        #
+        if not self.variables.metadata_changes:
+            self.variables.errors.append(
+                'No differences found in metadata.\n'
+                'Hitting "next" will not do any changes.')
+        #
+
     def __get_renaming_options(self):
         """Return renaming options"""
         return dict(
             artist_name=False,
-            medium_number=self.variables.release.medium_prefixes_required)
+            medium_number=self.variables
+            .local_release.medium_prefixes_required)
 
     def do_rename_files(self):
         """Rename files"""
         required_includes = self.__get_renaming_options()
         renaming_plan = safer_mass_rename.RenamingPlan()
-        for medium in self.variables.release.media_list:
+        for medium in self.variables.local_release.media_list:
             for track in medium.tracks_list:
                 renaming_plan.add(
                     track.file_path,
@@ -729,7 +785,7 @@ class UserInterface():
             'Double-click a release to open its MusicBrainz page'
             ' in your web browser.',
             justify=tkinter.LEFT)
-        label.grid(row=0, column=0, columnspan=2)
+        label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
         self.widgets.release_view = ttk.Treeview(
             master=select_frame,
             height=15,
@@ -771,6 +827,60 @@ class UserInterface():
         self.widgets.release_view['yscrollcommand'] = \
             self.widgets.scroll_vertical.set
         self.widgets.release_view.grid(
+            row=1, column=0)
+        self.widgets.scroll_vertical.grid(
+            row=1, column=1, sticky=tkinter.N+tkinter.S)
+        select_frame.grid(**self.grid_fullwidth)
+
+    def panel_confirm_metadata(self):
+        """Panel with Metadata chages confirmation"""
+        if not self.variables.metadata_changes:
+            return
+        #
+        self.variables.metadata_lookup.clear()
+        select_frame = tkinter.Frame(
+            self.widgets.action_area,
+            **self.with_border)
+        label = tkinter.Label(
+            select_frame,
+            text='Please review metadata changes.\n'
+            'Double-click a tag to toggle between the original value\n'
+            'and the value retrieved from MusicBrainz.',
+            justify=tkinter.LEFT)
+        label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
+        self.widgets.metadata_view = ttk.Treeview(
+            master=select_frame,
+            height=15,
+            selectmode=tkinter.BROWSE,
+            show='tree')
+        self.widgets.metadata_view.column('#0', width=500)
+        self.widgets.metadata_view.bind(
+            '<Double-Button-1>', self.toggle_tag_value)
+        self.widgets.metadata_view.bind(
+            '<Return>', self.toggle_tag_value)
+        for (file_name, single_change) \
+                in self.variables.metadata_changes.items():
+            track_iid = self.widgets.metadata_view.insert(
+                '',
+                tkinter.END,
+                open=True,
+                text=file_name)
+            #
+            for tag_key in single_change.keys():
+                tag_iid = self.widgets.metadata_view.insert(
+                    track_iid,
+                    tkinter.END,
+                    text=single_change.display(tag_key))
+                self.variables.metadata_lookup[tag_iid] = (file_name, tag_key)
+            #
+        #
+        self.widgets.scroll_vertical = tkinter.Scrollbar(
+            select_frame,
+            orient=tkinter.VERTICAL,
+            command=self.widgets.metadata_view.yview)
+        self.widgets.metadata_view['yscrollcommand'] = \
+            self.widgets.scroll_vertical.set
+        self.widgets.metadata_view.grid(
             row=1, column=0)
         self.widgets.scroll_vertical.grid(
             row=1, column=1, sticky=tkinter.N+tkinter.S)
@@ -842,6 +952,10 @@ class UserInterface():
         """Clear releases explicitly"""
         self.variables.mb_releases.clear()
 
+    def rollback_confirm_metadata(self):
+        """Clear metadata changes"""
+        self.variables.metadata_changes.clear()
+
     def show_about(self):
         """Show information about the application
         in a modal dialog
@@ -853,6 +967,31 @@ class UserInterface():
                 VERSION, HOMEPAGE)),
             ('License:', LICENSE_TEXT),
             title='About…')
+        #
+
+    def toggle_tag_value(self, event=None):
+        """Toggle the selected track value (source)"""
+        del event
+        tag_iid = self.widgets.metadata_view.focus()
+        try:
+            (track_file_name, tag_key) = self.variables.metadata_lookup[
+                tag_iid]
+        except ValueError:
+            pass
+        else:
+            # Delete and reattach the tag change
+            changes = self.variables.metadata_changes[track_file_name]
+            changes.toggle_source(tag_key)
+            track_iid = self.widgets.metadata_view.parent(tag_iid)
+            current_index = self.widgets.metadata_view.index(tag_iid)
+            self.widgets.metadata_view.delete(tag_iid)
+            self.widgets.metadata_view.insert(
+                    track_iid,
+                    current_index,
+                    iid=tag_iid,
+                    text=changes.display(tag_key))
+            self.widgets.metadata_view.focus(tag_iid)
+            self.widgets.metadata_view.selection_set(tag_iid)
         #
 
     def __show_errors(self):
