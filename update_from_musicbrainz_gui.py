@@ -322,7 +322,7 @@ class TrackMetadataChanges:
         Return the changes as a list.
         """
         if not self.__undo:
-            raise ValueError('Metadata not changed yet!')
+            return {}
         #
         metadata_changes = {}
         extra_attribute_changes = {}
@@ -380,8 +380,12 @@ class TrackMetadataChanges:
         #
         for key in sorted(self.extra_attributes):
             old_value = getattr(self.track, key)
-            new_value = mb_track_data.get(key)
-            if new_value and new_value != old_value:
+            try:
+                new_value = mb_track_data[key]
+            except ValueError:
+                continue
+            #
+            if new_value != old_value:
                 self.__changes[key] = (old_value, new_value)
                 self.__use_value[key] = 1
             #
@@ -442,7 +446,7 @@ class MusicBrainzMetadata:
                     current_track['sided_position'] = \
                         audio_metadata.SidedTrackPosition(mb_track.number)
                 except ValueError:
-                    pass
+                    current_track['sided_position'] = None
                 #
                 tracks[track_number] = current_track
             #
@@ -1219,14 +1223,16 @@ class UserInterface():
                 'Rollback method for phase #%s (%r)'
                 ' has not been defined yet' % (
                     phase_index, self.variables.current_panel))
-        except NotImplementedError:
-            self.variables.errors.append(
-                'Rollback method for phase #%s (%r)'
-                ' has not been implemented yet' % (
-                    phase_index, self.variables.current_panel))
         else:
             self.variables.current_phase = PHASES[phase_index - 1]
-            rollback_method()
+            try:
+                rollback_method()
+            except NotImplementedError:
+                self.variables.errors.append(
+                    'Rollback method for phase #%s (%r)'
+                    ' has not been implemented yet' % (
+                        phase_index, self.variables.current_panel))
+            #
         #
         self.__show_panel()
 
@@ -1435,21 +1441,29 @@ def __get_arguments():
     argument_parser.add_argument(
         '-d', '--directory',
         type=pathlib.Path,
-        default=pathlib.Path.cwd(),
-        help='A directory to print the tracklist from'
+        help='A directory with a release'
         ' (defaults to the current directory, in this case:'
         '%(default)s)')
+    argument_parser.add_argument(
+        'dummy',
+        nargs=argparse.REMAINDER)
     return argument_parser.parse_args()
 
 
-def main(arguments):
+def main(arguments=None):
     """Main script function"""
-    logging.basicConfig(format='%(levelname)-8s\u2551 %(message)s',
-                        level=arguments.loglevel)
-    selected_directory = arguments.directory
-    if not selected_directory.is_dir():
+    selected_directory = None
+    try:
+        loglevel = arguments.loglevel
+        selected_directory = arguments.directory
+    except AttributeError:
+        loglevel = logging.WARNING
+    #
+    if selected_directory and not selected_directory.is_dir():
         selected_directory = selected_directory.parent
     #
+    logging.basicConfig(format='%(levelname)-8s\u2551 %(message)s',
+                        level=loglevel)
     try:
         selected_names = os.environ['NAUTILUS_SCRIPT_SELECTED_FILE_PATHS']
     except KeyError:
@@ -1469,7 +1483,15 @@ def main(arguments):
 
 
 if __name__ == '__main__':
-    sys.exit(main(__get_arguments()))
+    # =========================================================================
+    # Workaround for unexpected behavior when called
+    # as a Nautilus script in combination with argparse
+    # =========================================================================
+    try:
+        sys.exit(main(__get_arguments()))
+    except Exception:
+        sys.exit(main())
+    #
 
 
 # vim: fileencoding=utf-8 ts=4 sts=4 sw=4 autoindent expandtab syntax=python:
