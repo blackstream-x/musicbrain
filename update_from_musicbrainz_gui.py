@@ -268,7 +268,7 @@ class TrackMetadataChanges:
         #
         for key in sorted(self.extra_attributes):
             old_value = getattr(self.track, key)
-            new_value = getattr(mb_track_data, key)
+            new_value = mb_track_data.get(key)
             if new_value and new_value != old_value:
                 self.__changes[key] = (old_value, new_value)
                 self.__use_value[key] = 1
