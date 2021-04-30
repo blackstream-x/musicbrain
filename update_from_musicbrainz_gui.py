@@ -307,9 +307,13 @@ class TrackMetadataChanges:
         """Display what would happen"""
         value = self.__changes[key][self.__use_value[key]]
         if self.__use_value[key]:
-            return '%s will be changed to %r' % (key, value)
+            return '%s \u21d2 %r' % (key, value)
         #
-        return '%s will be left at %r' % (key, value)
+        return '%s \u2205 %r' % (key, value)
+
+    def __len__(self):
+        """Number of identified changes"""
+        return len(self.__changes)
 
     # TODO: apply changes to the track, lock and create fallback
 
@@ -662,10 +666,13 @@ class UserInterface():
         for medium in self.variables.local_release.media_list:
             for track in medium.tracks_list:
                 try:
-                    self.variables.metadata_changes[track.file_path.name] = \
-                        TrackMetadataChanges(track, mb_metadata)
+                    changes = TrackMetadataChanges(track, mb_metadata)
                 except (MediumNotFound, TrackNotFound):
-                    pass
+                    continue
+                #
+                if changes:
+                    self.variables.metadata_changes[track.file_path.name] = \
+                        changes
                 #
             #
         #
@@ -844,8 +851,9 @@ class UserInterface():
         label = tkinter.Label(
             select_frame,
             text='Please review metadata changes.\n'
-            'Double-click a tag to toggle between the original value\n'
-            'and the value retrieved from MusicBrainz.',
+            'Double-click a tag to toggle between leaving'
+            ' the original value unchanged (\u2205)\n'
+            'and using the value retrieved from MusicBrainz (\u21d2).',
             justify=tkinter.LEFT)
         label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
         self.widgets.metadata_view = ttk.Treeview(
@@ -1072,7 +1080,7 @@ class UserInterface():
         #
         previous_button = tkinter.Button(
             self.widgets.buttons_area,
-            text='< Previous',
+            text='\u25c1 Previous',
             command=self.previous_panel,
             state=previous_button_state)
         previous_button.grid(column=0, sticky=tkinter.W, **buttons_grid)
@@ -1086,7 +1094,7 @@ class UserInterface():
         self.variables.disable_next_button = False
         next_button = tkinter.Button(
             self.widgets.buttons_area,
-            text='> Next',
+            text='\u25b7 Next',
             command=self.next_panel,
             state=next_button_state)
         next_button.grid(column=1, sticky=tkinter.W, **buttons_grid)
