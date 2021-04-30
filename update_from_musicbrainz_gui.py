@@ -201,7 +201,7 @@ class MusicBrainzMedium():
 
     def __init__(self, medium_data):
         """Set data from a medium data structure"""
-        self.format = medium_data['format']
+        self.format = medium_data.get('format', '<unknown format>')
         self.position = medium_data.get('position')
         self.track_count = medium_data['track-count']
         self.tracks = [
@@ -910,7 +910,7 @@ class UserInterface():
                 tkinter.END,
                 iid=single_release.id_,
                 text='%s, %s – (Score: %s)' % (
-                    single_release.date or 'unknown date',
+                    single_release.date or '<unknown date>',
                     single_release.media_summary,
                     single_release.score))
             #
@@ -1111,11 +1111,17 @@ class UserInterface():
             selectmode=tkinter.BROWSE,
             show='tree')
         result_view.column('#0', width=700)
+        number_success = len(
+            self.variables.rename_result.renamed_files)
+        conflicts = len(
+            self.variables.rename_result.conflicts)
+        errors = len(
+            self.variables.rename_result.errors)
         success_iid = result_view.insert(
             '',
             tkinter.END,
-            open=True,
-            text='Renamed files')
+            open=False,
+            text='Renamed files (%s)' % number_success)
         for rename_item in self.variables.rename_result.renamed_files:
             file_iid = result_view.insert(
                 success_iid,
@@ -1128,12 +1134,12 @@ class UserInterface():
                 text='→ %s' % rename_item.target_path.name)
             #
         #
-        if self.variables.rename_result.conflicts:
+        if conflicts:
             conflicts_iid = result_view.insert(
                 '',
                 tkinter.END,
-                open=True,
-                text='Omitted due to name conflicts:')
+                open=False,
+                text='Name conflicts (%s)' % conflicts)
             for message in \
                     self.variables.rename_result.get_conflict_messages():
                 result_view.insert(
@@ -1142,12 +1148,12 @@ class UserInterface():
                     text=message)
             #
         #
-        if self.variables.rename_result.errors:
+        if errors:
             errors_iid = result_view.insert(
                 '',
                 tkinter.END,
-                open=True,
-                text='Omitted due to name conflicts:')
+                open=False,
+                text='Errors (%s)' % errors)
             for message in \
                     self.variables.rename_result.get_error_messages():
                 result_view.insert(
