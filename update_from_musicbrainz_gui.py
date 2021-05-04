@@ -24,14 +24,11 @@ from tkinter import filedialog
 from tkinter import messagebox
 from tkinter import ttk
 
-# non-standardlib module
-
-import musicbrainzngs
-
 # local modules
 
 import audio_metadata
 import gui_commons
+import mbdata
 import safer_mass_rename
 
 
@@ -87,45 +84,38 @@ PHASES = (
     CONFIRM_RENAME,
     RENAME_FILES)
 
-FS_MB_RELEASE = 'https://musicbrainz.org/release/%s'
 
 #
 # Helper Functions
 #
 
 
-def extract_mbid(source_text):
-    """Return a musicbrainz ID from a string"""
-    try:
-        return PRX_MBID.match(source_text).group(1)
-    except AttributeError as error:
-        raise ValueError(
-            '%r does not contain a MusicBrainz ID' % source_text) from error
+def change_treeview_item_text(treeview, iid=None, text=None, select=True):
+    """Change the text of a ttk.Treeview item
+    by removing and reattaching it with the new text
+    """
+    parent_iid = treeview.parent(iid)
+    current_index = treeview.index(iid)
+    treeview.delete(iid)
+    treeview.insert(
+            parent_iid,
+            current_index,
+            iid=iid,
+            text=text)
+    if select:
+        treeview.focus(iid)
+        treeview.selection_set(iid)
     #
 
 
 def open_in_musicbrainz(release_id):
     """Open the webbrowser and show a release in MusicBrainz"""
-    webbrowser.open(FS_MB_RELEASE % extract_mbid(release_id))
+    webbrowser.open(mbdata.FS_RELEASE_URL % mbdata.extract_id(release_id))
 
 
 #
 # Classes
 #
-
-
-class MediumNotFound(Exception):
-
-    """Raised if the specified medium is not found"""
-
-    ...
-
-
-class TrackNotFound(Exception):
-
-    """Raised if the specified track is not found"""
-
-    ...
 
 
 class Namespace(dict):
@@ -174,376 +164,6 @@ class Namespace(dict):
         del self[name]
 
 
-class MusicBrainzTrack():
-
-    # pylint: disable=too-few-public-methods
-
-    """Keep data from a MusicBrainz track"""
-
-    def __init__(self, track_data):
-        """Set data from a track data structure"""
-        self.number = track_data['number']
-        self.position = track_data['position']
-        self.title = track_data['recording']['title']
-        self.artist_credit = track_data['artist-credit-phrase']
-        try:
-            self.length = int(track_data['length'])
-        except (KeyError, ValueError):
-            self.length = None
-        #
-
-
-class MusicBrainzMedium():
-
-    # pylint: disable=too-few-public-methods
-
-    """Keep data from a MusicBrainz medium"""
-
-    def __init__(self, medium_data):
-        """Set data from a medium data structure"""
-        self.format = medium_data.get('format', '<unknown format>')
-        self.position = medium_data.get('position')
-        self.track_count = medium_data['track-count']
-        self.tracks = [
-            MusicBrainzTrack(track_data)
-            for track_data in medium_data['track-list']]
-
-
-class MusicBrainzRelease():
-
-    """Keep data from a MusicBrainz release"""
-
-    def __init__(self, release_data, score_calculation=None):
-        """Set data from a release query result"""
-        self.id_ = release_data['id']
-        self.date = release_data.get('date')
-        self.title = release_data['title']
-        self.artist_credit = release_data['artist-credit-phrase']
-        self.media = [
-            MusicBrainzMedium(medium_data)
-            for medium_data in release_data['medium-list']]
-        self.score = 0
-        if score_calculation:
-            self.score = score_calculation.get_score_for(self)
-        #
-
-    @property
-    def media_summary(self):
-        """Summary of contained media with track counts"""
-        seen_formats = {}
-        for single_medium in self.media:
-            seen_formats.setdefault(
-                single_medium.format, []).append(single_medium.track_count)
-        #
-        output_list = []
-        for (format_name, track_counts) in seen_formats.items():
-            if len(track_counts) > 1:
-                output_list.append(
-                    '%s × %s (%s tracks)' % (
-                        len(track_counts),
-                        format_name,
-                        ' + '.join(str(count) for count in track_counts)))
-            else:
-                output_list.append(
-                    '%s (%s tracks)' % (format_name, track_counts[0]))
-            #
-        #
-        return ' + '.join(output_list)
-
-    def __eq__(self, other):
-        """Rich comparison: equals"""
-        return self.id_ == other.id_
-
-    def __gt__(self, other):
-        """Rich comparison: greater than"""
-        return self.score > other.score
-
-
-class TrackMetadataChanges:
-
-    """Metadata changes for a single track"""
-
-    extra_attributes = ('medium_number', 'sided_position',
-                        'total_tracks', 'track_number')
-
-    def __init__(self, track, mb_data):
-        """..."""
-        self.__changes = {}
-        self.__undo = {}
-        self.__use_value = {}
-        self.track = track
-        mb_medium = mb_data[track.medium_number]
-        try:
-            self.update_changes(mb_medium[track.track_number])
-        except KeyError as error:
-            raise TrackNotFound from error
-        #
-        self.keys = self.__changes.keys
-
-    def apply(self):
-        """Apply changes to the track.
-        Return the changes as a list.
-        """
-        if self.__undo:
-            raise ValueError('Metadata changed already!')
-        #
-        metadata_changes = {}
-        extra_attribute_changes = {}
-        for key in self.__changes:
-            if key in self.extra_attributes:
-                target = extra_attribute_changes
-            elif key in self.track.managed_tags:
-                target = metadata_changes
-            else:
-                logging.warning('Unknown tag %r!', key)
-                continue
-            #
-            if self.__use_value[key]:
-                target[key] = self.__changes[key][1]
-                self.__undo[key] = self.__changes[key][0]
-            #
-        #
-        if extra_attribute_changes:
-            for (key, value) in extra_attribute_changes.items():
-                setattr(self.track, key, value)
-            #
-            self.track.update_positions()
-        #
-        if metadata_changes:
-            self.track.update_tags(**metadata_changes)
-        #
-        if self.__undo:
-            return self.__save()
-        #
-        return {}
-
-    def rollback(self):
-        """roll back changes to the track.
-        Return the changes as a list.
-        """
-        if not self.__undo:
-            return {}
-        #
-        metadata_changes = {}
-        extra_attribute_changes = {}
-        for key in self.__undo:
-            if key in self.extra_attributes:
-                target = extra_attribute_changes
-            elif key in self.track.managed_tags:
-                target = metadata_changes
-            else:
-                logging.warning('Unknown tag %r!', key)
-                continue
-            #
-            if self.__use_value[key]:
-                target[key] = self.__undo[key]
-            #
-        #
-        if extra_attribute_changes:
-            for (key, value) in extra_attribute_changes.items():
-                setattr(self.track, key, value)
-            #
-            self.track.update_positions()
-        #
-        if metadata_changes:
-            self.track.update_tags(**metadata_changes)
-        #
-        self.__undo.clear()
-        return self.__save()
-
-    def __save(self):
-        """Save changes to the file"""
-        applied_changes = []
-        logging.warning(
-            'Saved Metadata changes in %r:',
-            self.track.file_path.name)
-        for (key, (old_value, new_value)) in self.track.save_tags().items():
-            current_change = '%s: %r → %r' % (key, old_value, new_value)
-            logging.debug(current_change)
-            applied_changes.append(current_change)
-        #
-        return applied_changes
-
-    def effective_value(self, key):
-        """Return the effective value for key"""
-        return self.__changes[key][self.__use_value[key]]
-
-    def update_changes(self, mb_track_data):
-        """Update the changes dict"""
-        self.__changes.clear()
-        for (key, new_value) in sorted(mb_track_data['metadata'].items()):
-            old_value = self.track[key]
-            if new_value != old_value:
-                self.__changes[key] = (old_value, new_value)
-                self.__use_value[key] = 1
-            #
-        #
-        for key in sorted(self.extra_attributes):
-            old_value = getattr(self.track, key)
-            try:
-                new_value = mb_track_data[key]
-            except ValueError:
-                continue
-            #
-            if new_value != old_value:
-                self.__changes[key] = (old_value, new_value)
-                self.__use_value[key] = 1
-            #
-        #
-
-    def toggle_source(self, key):
-        """Toggle the source of the item with the given key"""
-        if self.__undo:
-            raise ValueError('Metadata changed already!')
-        #
-        self.__use_value[key] = 1 - self.__use_value[key]
-
-    def display(self, key):
-        """Display what would happen"""
-        value = self.effective_value(key)
-        if self.__use_value[key]:
-            return '%s \u21d2 %r' % (key, value)
-        #
-        return '%s \u2205 %r' % (key, value)
-
-    def __len__(self):
-        """Number of identified changes"""
-        return len(self.__changes)
-
-
-class MusicBrainzMetadata:
-
-    # pylint: disable=too-few-public-methods
-
-    """Metadata from a MusicBrainz release"""
-
-    def __init__(self, mb_release):
-        """Store some data from the release"""
-        release_metadata = dict(
-            ALBUM=mb_release.title,
-            ALBUMARTIST=mb_release.artist_credit)
-        try:
-            release_metadata['DATE'] = mb_release.date[:4]
-        except TypeError:
-            pass
-        #
-        self.media = {}
-        for (medium_index, mb_medium) in enumerate(mb_release.media):
-            medium_number = medium_index + 1
-            medium_track_count = mb_medium.track_count
-            tracks = {}
-            for (track_index, mb_track) in enumerate(mb_medium.tracks):
-                track_number = track_index + 1
-                current_track = dict(
-                    total_tracks=medium_track_count,
-                    medium_number=medium_number,
-                    track_number=track_number,
-                    metadata=dict(
-                        TITLE=mb_track.title,
-                        ARTIST=mb_track.artist_credit))
-                current_track['metadata'].update(release_metadata)
-                try:
-                    current_track['sided_position'] = \
-                        audio_metadata.SidedTrackPosition(mb_track.number)
-                except ValueError:
-                    current_track['sided_position'] = None
-                #
-                tracks[track_number] = current_track
-            #
-            self.media[medium_number] = tracks
-        #
-
-    def __getitem__(self, name):
-        """Return the medium (dict-style access)"""
-        try:
-            return self.media[name]
-        except KeyError as error:
-            raise MediumNotFound from error
-        #
-
-
-class ScoreCalculation:
-
-    # pylint: disable=too-few-public-methods
-
-    """Object calculating how good a MusicBrainzRelease
-    matches an audio_metadata.Release
-    by comparing number of media, tracks per medium and date.
-    """
-
-    def __init__(self, release):
-        """Store the release object and a date if it is unique
-        over all contained tracks
-        """
-        self.release = release
-        self.date = None
-        collected_dates = set()
-        for medium in release.media_list:
-            for track in medium.tracks_list:
-                try:
-                    found_date = track.DATE
-                except AttributeError:
-                    continue
-                #
-                collected_dates.add(found_date)
-            #
-        #
-        if len(collected_dates) == 1:
-            self.date = collected_dates.pop()
-        #
-
-    def get_score_for(self, mb_release):
-        """Take a half-educated guess
-        about the similarity of the given MusicBrainz release
-        and self.release, comparing numer of media, number of tracks,
-        and the date if possible.
-        Return an integer. 100 is the highest possible score,
-        but there is no bottom limit.
-        """
-        media_penalty = 0
-        track_penalty = 0
-        date_penalty = 0
-        #
-        media_in_mb = len(mb_release.media)
-        local_media = self.release.effective_media_count
-        media_penalty = 0
-        if media_in_mb < local_media:
-            media_penalty = 10 * (local_media - media_in_mb)
-        elif media_in_mb > local_media:
-            media_penalty = media_in_mb - local_media
-        #
-        mb_media = [None] + mb_release.media
-        for medium_number in self.release.medium_numbers:
-            try:
-                tracks_in_mb = mb_media[medium_number].track_count
-            except IndexError:
-                track_penalty += 10
-                continue
-            #
-            local_tracks = self.release[medium_number].effective_total_tracks
-            if tracks_in_mb > local_tracks:
-                track_penalty += 3 * (tracks_in_mb - local_tracks)
-            elif tracks_in_mb < local_tracks:
-                track_penalty += 7 * (local_tracks - tracks_in_mb)
-            #
-        #
-        if self.date and mb_release.date != self.date:
-            if mb_release.date:
-                comparable_date = mb_release.date[:4]
-                try:
-                    difference = int(self.date) - int(comparable_date)
-                except ValueError:
-                    date_penalty = 15
-                else:
-                    date_penalty = abs(difference)
-                #
-            else:
-                date_penalty = 15
-            #
-        #
-        return 100 - media_penalty - track_penalty - date_penalty
-
-
 class UserInterface():
 
     """GUI using tkinter"""
@@ -564,7 +184,7 @@ class UserInterface():
         """Build the GUI"""
         self.main_window = tkinter.Tk()
         self.main_window.title(MAIN_WINDOW_TITLE)
-        musicbrainzngs.set_useragent(SCRIPT_NAME, VERSION, contact=HOMEPAGE)
+        mbdata.set_useragent(SCRIPT_NAME, VERSION, contact=HOMEPAGE)
         self.variables = Namespace(
             mbid_entry=tkinter.StringVar(),
             album=tkinter.StringVar(),
@@ -647,72 +267,52 @@ class UserInterface():
 
     def do_select_mb_release(self):
         """Lookup releases in MusicBrainz"""
-        score_calculation = ScoreCalculation(self.variables.local_release)
         self.variables.mb_releases.clear()
         mbid_value = self.variables.mbid_entry.get()
         if mbid_value:
             try:
-                release_mbid = extract_mbid(mbid_value)
+                release_mbid = mbdata.extract_id(mbid_value)
             except ValueError:
                 self.variables.errors.append(
                     '%r does not contain a valid'
                     ' MusicBrainz ID.' % mbid_value)
             else:
                 try:
-                    release_data = musicbrainzngs.get_release_by_id(
-                        release_mbid,
-                        includes=[
-                            'media',
-                            'artists',
-                            'recordings',
-                            'artist-credits'])
-                except musicbrainzngs.musicbrainz.ResponseError:
-                    self.variables.errors.append(
-                        'No release in MusicBrainz with ID %r.' % release_mbid)
+                    self.variables.selected_mb_release = \
+                            mbdata.release_from_id(
+                                release_mbid,
+                                local_release=self.variables.local_release)
+                except ValueError as error:
+                    self.variables.errors.append(str(error))
                 else:
-                    self.variables.selected_mb_release = MusicBrainzRelease(
-                        release_data['release'],
-                        score_calculation=score_calculation)
                     self.variables.mb_releases.append(
                         self.variables.selected_mb_release)
                 #
             #
         else:
             # Get releases from musicbrainz
-            album = self.variables.album.get()
-            albumartist = self.variables.albumartist.get()
-            search_criteria = []
-            if album:
-                search_criteria.append('"%s"' % album)
-            #
-            if albumartist:
-                search_criteria.append('artist:"%s"' % albumartist)
-            #
-            if search_criteria:
-                query_result = musicbrainzngs.search_releases(
-                    query=' AND '.join(search_criteria))
-                #
-                releases = [
-                    MusicBrainzRelease(
-                        single_release,
-                        score_calculation=score_calculation)
-                    for single_release in query_result['release-list']]
+            try:
                 self.variables.mb_releases.extend(
-                    sorted(releases, reverse=True))
-                if not self.variables.mb_releases:
-                    self.variables.errors.append(
-                        'No matching releases found.')
-                #
-            else:
+                    sorted(
+                        mbdata.releases_from_search(
+                            album=self.variables.album.get(),
+                            albumartist=self.variables.albumartist.get(),
+                            local_release=self.variables.local_release),
+                        reverse=True))
+            except ValueError as error:
+                self.variables.errors.append(str(error))
+            #
+            if not self.variables.mb_releases:
                 self.variables.errors.append(
-                    'Missing data: album name or artist are required.')
+                    'No matching releases found.')
             #
         #
 
     def do_confirm_metadata(self):
         """Prepare Metadata change"""
         try:
-            release_mbid = extract_mbid(self.widgets.release_view.focus())
+            release_mbid = mbdata.extract_id(
+                self.widgets.release_view.focus())
         except ValueError:
             self.variables.errors.append(
                 'No release selected.')
@@ -723,31 +323,23 @@ class UserInterface():
         if not self.variables.selected_mb_release \
                 or self.variables.selected_mb_release.id_ != release_mbid:
             try:
-                release_data = musicbrainzngs.get_release_by_id(
-                    release_mbid,
-                    includes=[
-                        'media',
-                        'artists',
-                        'recordings',
-                        'artist-credits'])
-            except musicbrainzngs.musicbrainz.ResponseError:
-                self.variables.errors.append(
-                    'No release in MusicBrainz with ID %r.' % release_mbid)
+                self.variables.selected_mb_release = \
+                        mbdata.release_from_id(release_mbid)
+            except ValueError as error:
+                self.variables.errors.append(str(error))
                 self.variables.disable_next_button = True
                 return
-            else:
-                self.variables.selected_mb_release = MusicBrainzRelease(
-                    release_data['release'])
             #
         #
         # Build map of metadata changes per track
-        mb_metadata = MusicBrainzMetadata(self.variables.selected_mb_release)
+        mb_metadata = mbdata.ReleaseMetadata(
+            self.variables.selected_mb_release)
         self.variables.metadata_changes.clear()
         for medium in self.variables.local_release.media_list:
             for track in medium.tracks_list:
                 try:
-                    changes = TrackMetadataChanges(track, mb_metadata)
-                except (MediumNotFound, TrackNotFound):
+                    changes = mbdata.TrackMetadataChanges(track, mb_metadata)
+                except (mbdata.MediumNotFound, mbdata.TrackNotFound):
                     continue
                 #
                 if changes:
@@ -913,6 +505,11 @@ class UserInterface():
                     single_release.date or '<unknown date>',
                     single_release.media_summary,
                     single_release.score))
+            #
+            # Focus and select the first release
+            if not self.widgets.release_view.focus():
+                self.widgets.release_view.focus(single_release.id_)
+                self.widgets.release_view.selection_set(single_release.id_)
             #
         #
         self.widgets.scroll_vertical = tkinter.Scrollbar(
@@ -1296,16 +893,10 @@ class UserInterface():
             # Delete and reattach the tag change
             changes = self.variables.metadata_changes[track_file_name]
             changes.toggle_source(tag_key)
-            track_iid = self.widgets.metadata_view.parent(tag_iid)
-            current_index = self.widgets.metadata_view.index(tag_iid)
-            self.widgets.metadata_view.delete(tag_iid)
-            self.widgets.metadata_view.insert(
-                    track_iid,
-                    current_index,
-                    iid=tag_iid,
-                    text=changes.display(tag_key))
-            self.widgets.metadata_view.focus(tag_iid)
-            self.widgets.metadata_view.selection_set(tag_iid)
+            change_treeview_item_text(
+                self.widgets.metadata_view,
+                iid=tag_iid,
+                text=changes.display(tag_key))
         #
 
     def __show_errors(self):
