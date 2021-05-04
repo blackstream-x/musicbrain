@@ -15,7 +15,7 @@ import argparse
 import logging
 import os
 import pathlib
-import re
+# import re
 import sys
 import tkinter
 import webbrowser
@@ -60,11 +60,6 @@ try:
 except OSError as error:
     VERSION = '(Version file is missing: %s)' % error
 #
-
-
-PRX_MBID = re.compile(
-    r'.*? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
-    re.X)
 
 # Phases
 CHOOSE_LOCAL_RELEASE = 'choose_local_release'
@@ -332,7 +327,7 @@ class UserInterface():
             #
         #
         # Build map of metadata changes per track
-        mb_metadata = mbdata.ReleaseMetadata(
+        mb_metadata = mbdata.DeprecatedReleaseMetadata(
             self.variables.selected_mb_release)
         self.variables.metadata_changes.clear()
         for medium in self.variables.local_release.media_list:

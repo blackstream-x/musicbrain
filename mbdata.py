@@ -155,11 +155,128 @@ class Release():
         return self.score > other.score
 
 
-class ReleaseMetadata:
+# Cascading metadata classes
+
+
+class Xlator(dict):
+
+    """All-in-one multiple-string-substitution class from
+    <https://www.oreilly.com/library/view
+     /python-cookbook/0596001673/ch03s15.html>
+    """
+
+    def _make_regex(self):
+        """ Build re object based on the keys of the current dictionary """
+        return re.compile("|".join(map(re.escape, self.keys(  ))))
+
+    def __call__(self, match):
+        """ Handler invoked for each regex match """
+        return self[match.group(0)]
+
+    def xlat(self, text):
+        """ Translate text, returns the modified text. """
+        return self._make_regex().sub(self, text)
+
+
+class Translatable:
+
+    """Translatable metadata"""
+
+    def __init__(self):
+        """Store some data from the release"""
+        self._metadata = {}
+        self._replacements = {}
+        self._use_replacements = {}
+
+    def translate(self, translator):
+        """Translate all metadata contents"""
+        if translator:
+            for (key, value) in self._metadata:
+                self._replacements[key] = translator.xlat(value)
+                self._use_replacements[key] = True
+            #
+        #
+
+    def toggle_translation(self, key):
+        """Toggle the use_replacemtns value"""
+        self._use_replacements[key] = not self._use_replacements[key]
+
+    def __getitem__(self, name):
+        """Item access to metadata"""
+        if self._use_replacements[name]:
+            return self._replacements[name]
+        #
+        return self._metadata[name]
+
+
+class TrackMetadata(Translatable):
+
+    """Data from a MusicBrainz track"""
+
+    def __init__(self, mb_track, translator=None):
+        """Store some data from the release"""
+        self.track_number = int(mb_track.number, 10)
+        super().__init__()
+        self._metadata.update(
+            dict(TITLE=mb_track.title,
+                 ARTIST=mb_track.artist_credit))
+        self.translate(translator)
+
+
+class ReleaseMetadata(Translatable):
 
     # pylint: disable=too-few-public-methods
 
-    """Metadata from a MusicBrainz release"""
+    """Metadata from a MusicBrainz release, TODO"""
+
+    def __init__(self, mb_release, translator=None):
+        """Store some data from the release"""
+        self.media = {}
+        super().__init__()
+        self._metadata.update(
+            dict(ALBUM=mb_release.title,
+                 ALBUMARTIST=mb_release.artist_credit))
+        try:
+            self._metadata['DATE'] = mb_release.date[:4]
+        except TypeError:
+            pass
+        #
+        self.translate(translator)
+# =============================================================================
+#         for (medium_index, mb_medium) in enumerate(mb_release.media):
+#             medium_number = medium_index + 1
+#             medium_track_count = mb_medium.track_count
+#             tracks = {}
+#             for (track_index, mb_track) in enumerate(mb_medium.tracks):
+#                 track_number = track_index + 1
+#                 current_track = dict(
+#                     total_tracks=medium_track_count,
+#                     medium_number=medium_number,
+#                     track_number=track_number,
+#                     metadata=dict(
+#                         TITLE=mb_track.title,
+#                         ARTIST=mb_track.artist_credit))
+#                 current_track['metadata'].update(release_metadata)
+#                 try:
+#                     current_track['sided_position'] = \
+#                         audio_metadata.SidedTrackPosition(mb_track.number)
+#                 except ValueError:
+#                     current_track['sided_position'] = None
+#                 #
+#                 tracks[track_number] = current_track
+#             #
+#             self.media[medium_number] = tracks
+#         #
+# =============================================================================
+
+
+class DeprecatedReleaseMetadata:
+
+    # pylint: disable=too-few-public-methods
+
+    """Metadata from a MusicBrainz release:
+    deprecated old class
+    """
 
     def __init__(self, mb_release):
         """Store some data from the release"""
