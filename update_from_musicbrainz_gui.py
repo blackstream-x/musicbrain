@@ -26,7 +26,6 @@ from tkinter import ttk
 
 # local modules
 
-import audio_metadata
 import gui_commons
 import mbdata
 import safer_mass_rename
@@ -237,9 +236,8 @@ class UserInterface():
                     selected_directory)
             #
             try:
-                self.variables.local_release = \
-                    audio_metadata.get_release_from_path(
-                        self.variables.directory_path)
+                self.variables.local_release = mbdata.local_release_from_path(
+                    self.variables.directory_path)
             except ValueError as error:
                 messagebox.showerror(
                     'Error while reading release',
@@ -327,13 +325,12 @@ class UserInterface():
             #
         #
         # Build map of metadata changes per track
-        mb_metadata = mbdata.DeprecatedReleaseMetadata(
-            self.variables.selected_mb_release)
         self.variables.metadata_changes.clear()
         for medium in self.variables.local_release.media_list:
             for track in medium.tracks_list:
                 try:
-                    changes = mbdata.TrackMetadataChanges(track, mb_metadata)
+                    changes = mbdata.LocalTrackChanges(
+                        track, self.variables.selected_mb_release)
                 except (mbdata.MediumNotFound, mbdata.TrackNotFound):
                     continue
                 #
@@ -480,8 +477,8 @@ class UserInterface():
             '<Return>', self.open_selected_release)
         for single_release in self.variables.mb_releases:
             release_full_name = '%s – %s' % (
-                single_release.artist_credit,
-                single_release.title)
+                single_release[mbdata.ALBUMARTIST],
+                single_release[mbdata.ALBUM])
             try:
                 parent_iid = release_iids[release_full_name.lower()]
             except KeyError:
