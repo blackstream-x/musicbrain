@@ -78,6 +78,10 @@ PHASES = (
     CONFIRM_RENAME,
     RENAME_FILES)
 
+REPLACEMENTS = mbdata.Xlator({
+    "'": '\u2019',
+    "...": '\u2026'})
+
 
 #
 # Helper Functions
@@ -312,7 +316,7 @@ class UserInterface():
             self.variables.disable_next_button = True
             return
         #
-        # Fetch data from MB only if they are noth here yet
+        # Fetch data from MB only if they are not here yet
         if not self.variables.selected_mb_release \
                 or self.variables.selected_mb_release.id_ != release_mbid:
             try:
@@ -324,6 +328,8 @@ class UserInterface():
                 return
             #
         #
+        # Translate tags
+        self.variables.selected_mb_release.translate(REPLACEMENTS)
         # Build map of metadata changes per track
         self.variables.metadata_changes.clear()
         for medium in self.variables.local_release.media_list:

@@ -25,13 +25,17 @@ import audio_metadata
 # Constants
 #
 
-
+# Tags
 ALBUM = 'ALBUM'
 ALBUMARTIST = 'ALBUMARTIST'
 ARTIST = 'ARTIST'
 DATE = 'DATE'
 TITLE = 'TITLE'
 
+# Track attributes
+SIDED_POSITION = 'sided_position'
+TOTAL_TRACKS = 'total_tracks'
+TRACK_NUMBER = 'track_number'
 
 PRX_MBID = re.compile(
     r'.*? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
@@ -112,7 +116,7 @@ class Translatable:
     def translate(self, translator):
         """Translate all metadata contents"""
         if translator:
-            for (key, value) in self._metadata:
+            for (key, value) in self._metadata.items():
                 self._replacements[key] = translator.xlat(value)
                 self._use_replacements[key] = True
             #
@@ -149,9 +153,9 @@ class Track(Translatable):
         #
         self.track_number = int(track_data['position'], 10)
         super().__init__()
-        self._metadata.update(
-            dict(TITLE=track_data['recording']['title'],
-                 ARTIST=track_data['artist-credit-phrase']))
+        self._metadata.update({
+            TITLE: track_data['recording']['title'],
+            ARTIST: track_data['artist-credit-phrase']})
 
 
 class Medium:
@@ -197,11 +201,11 @@ class Release(Translatable):
         self.score = 0
         self.date = release_data.get('date')
         super().__init__()
-        self._metadata.update(
-            dict(ALBUM=release_data['title'],
-                 ALBUMARTIST=release_data['artist-credit-phrase']))
+        self._metadata.update({
+            ALBUM: release_data['title'],
+            ALBUMARTIST: release_data['artist-credit-phrase']})
         try:
-            self._metadata['DATE'] = self.date[:4]
+            self._metadata[DATE] = self.date[:4]
         except TypeError:
             pass
         #
@@ -336,8 +340,7 @@ class LocalTrackChanges:
 
     """Metadata changes for a single local track"""
 
-    extra_attributes = ('medium_number', 'sided_position',
-                        'total_tracks', 'track_number')
+    extra_attributes = (SIDED_POSITION, TOTAL_TRACKS, TRACK_NUMBER)
 
     def __init__(self, track, mb_release):
         """..."""
@@ -470,10 +473,10 @@ class LocalTrackChanges:
         except KeyError as error:
             raise TrackNotFound from error
         #
-        self.__register_attribute_change('sided_position', source=mb_track)
-        self.__register_attribute_change('total_tracks',
+        self.__register_attribute_change(SIDED_POSITION, source=mb_track)
+        self.__register_attribute_change(TOTAL_TRACKS,
                                          new_value=total_tracks)
-        self.__register_attribute_change('track_number', source=mb_track)
+        self.__register_attribute_change(TRACK_NUMBER, source=mb_track)
         self.__register_tag_change(ARTIST, source=mb_track)
         self.__register_tag_change(TITLE, source=mb_track)
         self.__register_tag_change(ALBUMARTIST, source=mb_release)
