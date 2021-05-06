@@ -36,6 +36,7 @@ TITLE = 'TITLE'
 SIDED_POSITION = 'sided_position'
 TOTAL_TRACKS = 'total_tracks'
 TRACK_NUMBER = 'track_number'
+MEDIUM_NUMBER = 'medium_number'
 
 PRX_MBID = re.compile(
     r'.*? ( [\da-f]{8} (?: - [\da-f]{4}){3} - [\da-f]{12} )',
@@ -118,6 +119,11 @@ class Translatable:
         """Return the names of all translated tags, sorted."""
         return sorted(self._use_replacements.keys())
 
+    def clear_translations(self):
+        """Clear all translations"""
+        self._replacements.clear()
+        self._use_replacements.clear()
+
     def describe(self, name):
         """Describe the tag and its value for display purposes"""
         if self._use_replacements.get(name, False):
@@ -188,8 +194,8 @@ class Medium:
             Track(track_data)
             for track_data in medium_data['track-list']]
         self.tracks = {}
-        for (track_index, track) in enumerate(self.tracks_list):
-            self.tracks[track_index + 1] = track
+        for track in self.tracks_list:
+            self.tracks[track.track_number] = track
         #
         if self.track_count != len(self.tracks_list):
             logging.warning(
@@ -210,8 +216,8 @@ class Release(Translatable):
             Medium(medium_data)
             for medium_data in release_data['medium-list']]
         self.media = {}
-        for (medium_index, medium) in enumerate(self.media_list):
-            self.media[medium_index + 1] = medium
+        for (medium_number, medium) in self.enumerate_media():
+            self.media[medium_number] = medium
         #
         self.score = 0
         self.date = release_data.get('date')
@@ -251,6 +257,77 @@ class Release(Translatable):
         #
         return ' + '.join(output_list)
 
+    @property
+    def translated_accessors(self):
+        """Return a list of dicts (accessors for ...)"""
+        accessors = [
+            dict(tag_name=tag_name) for tag_name in self.translated_tags]
+        for (medium_number, medium) in self.enumerate_media():
+            for (track_number, track) in medium.tracks.items():
+                accessors.extend([
+                    dict(medium_number=medium_number,
+                         track_number=track_number,
+                         tag_name=tag_name)
+                    for tag_name in track.translated_tags])
+            #
+        #
+        return accessors
+
+    def clear_translations(self):
+        """Clear all translations of the own and the tracks’ metadata"""
+        super().clear_translations()
+        for medium in self.media_list:
+            for track in medium.tracks_list:
+                track.clear_translations()
+            #
+        #
+
+    def get_description(self,
+                        tag_name=None,
+                        medium_number=None,
+                        track_number=None):
+        """Return the description for the specified tag.
+        Raises MediumNotFound, TrackNotFound or KeyError
+        if the keyword arguments point to non-existing data.
+        Raises an AttributeError if medium_number was specified,
+        but track_number not.
+        """
+        return self.get_object(
+            medium_number=medium_number,
+            track_number=track_number).describe(tag_name)
+
+    def get_object(self,
+                   medium_number=None,
+                   track_number=None):
+        """Return the object determined by the keyword arguments.
+        Raises MediumNotFound or TrackNotFound or KeyError
+        if the keyword arguments point to a non-existing object.
+        """
+        if medium_number:
+            try:
+                medium = self.media[medium_number]
+            except KeyError as error:
+                raise MediumNotFound from error
+            #
+        #
+        if track_number:
+            try:
+                return medium.tracks[track_number]
+            except (KeyError, NameError) as error:
+                raise TrackNotFound from error
+            #
+        #
+        try:
+            return medium
+        except NameError:
+            return self
+        #
+
+    def enumerate_media(self):
+        """Yield (medium_number, medium) tuples, starting at 1."""
+        for (medium_index, medium) in enumerate(self.media_list):
+            yield (medium_index + 1, medium)
+
     def translate(self, translator):
         """Translate own metadata and those of all tracks"""
         super().translate(translator)
@@ -267,6 +344,10 @@ class Release(Translatable):
     def __gt__(self, other):
         """Rich comparison: greater than"""
         return self.score > other.score
+
+    def __str__(self):
+        """Return <ALBUMARTIST> – <ALBUM>"""
+        return '%s – %s' % (self[ALBUMARTIST], self[ALBUM])
 
 
 class ScoreCalculation:

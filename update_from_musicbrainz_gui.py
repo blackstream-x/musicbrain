@@ -64,6 +64,7 @@ except OSError as error:
 CHOOSE_LOCAL_RELEASE = 'choose_local_release'
 LOCAL_RELEASE_DATA = 'local_release_data'
 SELECT_MB_RELEASE = 'select_mb_release'
+CONFIRM_TRANSLATIONS = 'confirm_translations'
 CONFIRM_METADATA = 'confirm_metadata'
 RENAME_OPTIONS = 'rename_options'
 CONFIRM_RENAME = 'confirm_rename'
@@ -73,10 +74,22 @@ PHASES = (
     CHOOSE_LOCAL_RELEASE,
     LOCAL_RELEASE_DATA,
     SELECT_MB_RELEASE,
+    CONFIRM_TRANSLATIONS,
     CONFIRM_METADATA,
     RENAME_OPTIONS,
     CONFIRM_RENAME,
     RENAME_FILES)
+
+PANEL_NAMES = {
+    LOCAL_RELEASE_DATA: 'Review / change local release data',
+    SELECT_MB_RELEASE: 'Select the matching release from MusicBrainz',
+    CONFIRM_TRANSLATIONS: 'Confirm typograpy fixes in data from MusicBrainz',
+    CONFIRM_METADATA: 'Confirm local Metadata changes',
+    RENAME_OPTIONS:
+        'View local metadata change result /'
+        ' options for renaming files',
+    CONFIRM_RENAME: 'Confirm files renaming',
+    RENAME_FILES: 'View files renaming results'}
 
 REPLACEMENTS = mbdata.Xlator({
     "'": '\u2019',
@@ -198,7 +211,9 @@ class UserInterface():
             selected_mb_release=None,
             metadata_changes={},
             metadata_lookup={},
+            metadata_translations={},
             changed_tracks={},
+            fix_typography=tkinter.IntVar(),
             always_include_artist=tkinter.IntVar(),
             include_medium=tkinter.IntVar(),
             rename_result=None)
@@ -305,8 +320,8 @@ class UserInterface():
             #
         #
 
-    def do_confirm_metadata(self):
-        """Prepare Metadata change"""
+    def do_confirm_translations(self):
+        """Prepare metadata (from MusicBrainz) translations"""
         try:
             release_mbid = mbdata.extract_id(
                 self.widgets.release_view.focus())
@@ -328,8 +343,27 @@ class UserInterface():
                 return
             #
         #
-        # Translate tags
-        self.variables.selected_mb_release.translate(REPLACEMENTS)
+        # Translate tag values if typography fixes are required
+        self.variables.selected_mb_release.clear_translations()
+        if self.variables.fix_typography.get():
+            self.variables.selected_mb_release.translate(REPLACEMENTS)
+        #
+        # Directly jump to the next panel if no translations are found
+        if not self.check_translations():
+            self.variables.current_panel = CONFIRM_TRANSLATIONS
+            self.next_action()
+        #
+
+    def check_translations(self):
+        """Check translations, return True or False"""
+        if self.variables.selected_mb_release.translated_accessors:
+            return True
+        #
+        self.variables.errors.append('No typograpy fixes required.')
+        return False
+
+    def do_confirm_metadata(self):
+        """Prepare Metadata change"""
         # Build map of metadata changes per track
         self.variables.metadata_changes.clear()
         for medium in self.variables.local_release.media_list:
@@ -337,7 +371,11 @@ class UserInterface():
                 try:
                     changes = mbdata.LocalTrackChanges(
                         track, self.variables.selected_mb_release)
-                except (mbdata.MediumNotFound, mbdata.TrackNotFound):
+                except (mbdata.MediumNotFound,
+                        mbdata.TrackNotFound) as error:
+                    logging.warning('Error on track %r: %s',
+                                    track.file_path.name,
+                                    error)
                     continue
                 #
                 if changes:
@@ -346,11 +384,18 @@ class UserInterface():
                 #
             #
         #
-        if not self.variables.metadata_changes:
-            self.variables.errors.append(
-                'No differences found in metadata.\n'
-                'Hitting "next" will not do any changes.')
+        self.check_metadata_changes()
+
+    def check_metadata_changes(self):
+        """Check for metadata changes, return True or False"""
+        logging.debug('Metadata changes: %r', self.variables.metadata_changes)
+        if self.variables.metadata_changes:
+            return True
         #
+        self.variables.errors.append(
+            'No differences found in metadata.\n'
+            'Hitting "next" will not do any changes.')
+        return False
 
     def do_rename_options(self):
         """Execute the prepared Metadata change"""
@@ -520,10 +565,126 @@ class UserInterface():
             row=1, column=0)
         self.widgets.scroll_vertical.grid(
             row=1, column=1, sticky=tkinter.N+tkinter.S)
+        fix_typography = tkinter.Checkbutton(
+            select_frame,
+            text='Fix typography in Metadata',
+            variable=self.variables.fix_typography,
+            justify=tkinter.LEFT)
+        fix_typography.grid(
+            row=2, column=0, columnspan=2, padx=4, sticky=tkinter.W)
+        fix_typography.select()
+        select_frame.grid(**self.grid_fullwidth)
+
+    def panel_confirm_translations(self):
+        """Panel with Metadata translations display"""
+        self.variables.metadata_translations.clear()
+        select_frame = tkinter.Frame(
+            self.widgets.action_area,
+            **self.with_border)
+        mb_release = self.variables.selected_mb_release
+        if not mb_release.translated_accessors:
+            return
+        #
+        label = tkinter.Label(
+            select_frame,
+            text='Please review typography fixes.\n'
+            'Double-click a tag to toggle between leaving'
+            ' the value from MusicBrainz unchanged\n'
+            'and using the typographically fixed value.',
+            justify=tkinter.LEFT)
+        label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
+        self.widgets.translation_view = ttk.Treeview(
+            master=select_frame,
+            height=15,
+            selectmode=tkinter.BROWSE,
+            show='tree')
+        self.widgets.translation_view.column('#0', width=700)
+        self.widgets.translation_view.bind(
+            '<Double-Button-1>', self.toggle_translation)
+        self.widgets.translation_view.bind(
+            '<Return>', self.toggle_translation)
+        release_iid = None
+        media_iids = {}
+        track_iids = {}
+        for accessor in \
+                mb_release.translated_accessors:
+            if not release_iid:
+                release_iid = self.widgets.translation_view.insert(
+                    '',
+                    tkinter.END,
+                    open=True,
+                    text=str(mb_release))
+            #
+            description = mb_release.get_description(**accessor)
+            try:
+                track_number = accessor[mbdata.TRACK_NUMBER]
+            except KeyError:
+                current_iid = self.widgets.translation_view.insert(
+                    release_iid,
+                    tkinter.END,
+                    text=description)
+            else:
+                try:
+                    medium_number = accessor[mbdata.MEDIUM_NUMBER]
+                except KeyError:
+                    logging.warning('Medium for accessor %r not found',
+                                    accessor)
+                    continue
+                else:
+                    try:
+                        medium_iid = media_iids[medium_number]
+                    except KeyError:
+                        medium_iid = self.widgets.translation_view.insert(
+                            release_iid,
+                            tkinter.END,
+                            open=True,
+                            text='%s #%s' % (
+                                mb_release.get_object(
+                                    medium_number=medium_number).format,
+                                medium_number))
+                        media_iids[medium_number] = medium_iid
+                    #
+                    try:
+                        track_iid = track_iids[
+                            (medium_number, track_number)]
+                    except KeyError:
+                        mb_track = mb_release.get_object(
+                            medium_number=medium_number,
+                            track_number=track_number)
+                        track_iid = self.widgets.translation_view.insert(
+                            medium_iid,
+                            tkinter.END,
+                            open=True,
+                            text='%02d. %s – %s' % (
+                                mb_track.track_number,
+                                mb_track[mbdata.ARTIST],
+                                mb_track[mbdata.TITLE]))
+                        track_iids[
+                            (medium_number, track_number)] = track_iid
+                    #
+                    current_iid = self.widgets.translation_view.insert(
+                        track_iid,
+                        tkinter.END,
+                        text=description)
+                #
+            #
+            self.variables.metadata_translations[current_iid] = \
+                accessor
+        #
+        self.widgets.scroll_vertical = tkinter.Scrollbar(
+            select_frame,
+            orient=tkinter.VERTICAL,
+            command=self.widgets.translation_view.yview)
+        self.widgets.translation_view['yscrollcommand'] = \
+            self.widgets.scroll_vertical.set
+        self.widgets.translation_view.grid(
+            row=1, column=0)
+        self.widgets.scroll_vertical.grid(
+            row=1, column=1, sticky=tkinter.N+tkinter.S)
         select_frame.grid(**self.grid_fullwidth)
 
     def panel_confirm_metadata(self):
-        """Panel with Metadata chages confirmation"""
+        """Panel with Metadata changes confirmation"""
         if not self.variables.metadata_changes:
             return
         #
@@ -697,7 +858,7 @@ class UserInterface():
             **self.with_border)
         label = tkinter.Label(
             select_frame,
-            text='Resuts of the mass rename operation:',
+            text='Results of the mass renaming operation:',
             justify=tkinter.LEFT)
         label.grid(row=0, column=0, columnspan=2, sticky=tkinter.W)
         result_view = ttk.Treeview(
@@ -763,23 +924,15 @@ class UserInterface():
             command=result_view.yview)
         result_view['yscrollcommand'] = \
             self.widgets.scroll_vertical.set
-        self.widgets.scroll_horizontal = tkinter.Scrollbar(
-            select_frame,
-            orient=tkinter.HORIZONTAL,
-            command=result_view.xview)
-        result_view['xscrollcommand'] = \
-            self.widgets.scroll_horizontal.set
         result_view.grid(
             row=1, column=0)
         self.widgets.scroll_vertical.grid(
             row=1, column=1, sticky=tkinter.N+tkinter.S)
-        self.widgets.scroll_horizontal.grid(
-            row=2, column=0, sticky=tkinter.W+tkinter.E)
         select_frame.grid(**self.grid_fullwidth)
         #
 
-    def next_panel(self):
-        """Go to the next panel"""
+    def next_action(self):
+        """Execute the next action"""
         next_index = PHASES.index(self.variables.current_panel) + 1
         try:
             next_phase = PHASES[next_index]
@@ -801,6 +954,10 @@ class UserInterface():
             self.variables.current_phase = next_phase
             action_method()
         #
+
+    def next_panel(self):
+        """Execute the next action and go to the next panel"""
+        self.next_action()
         self.__show_panel()
 
     def open_selected_release(self, event=None):
@@ -846,9 +1003,14 @@ class UserInterface():
         """Clear releases explicitly"""
         self.variables.mb_releases.clear()
 
+    def rollback_confirm_translations(self):
+        """Clear metadata translations"""
+        self.variables.metadata_translations.clear()
+
     def rollback_confirm_metadata(self):
         """Clear metadata changes"""
         self.variables.metadata_changes.clear()
+        self.check_translations()
 
     def rollback_rename_options(self):
         """Undo the prepared Metadata change"""
@@ -856,6 +1018,7 @@ class UserInterface():
         for changes in self.variables.metadata_changes.values():
             changes.rollback()
         #
+        self.check_metadata_changes()
 
     def rollback_confirm_rename(self):
         """Just remove the renaming plan"""
@@ -879,22 +1042,42 @@ class UserInterface():
         #
 
     def toggle_tag_value(self, event=None):
-        """Toggle the selected track value (source)"""
+        """Toggle the selected tag value (source)"""
         del event
         tag_iid = self.widgets.metadata_view.focus()
         try:
-            (track_file_name, tag_key) = self.variables.metadata_lookup[
+            (track_file_name, tag_name) = self.variables.metadata_lookup[
                 tag_iid]
         except ValueError:
             pass
         else:
             # Delete and reattach the tag change
             changes = self.variables.metadata_changes[track_file_name]
-            changes.toggle_source(tag_key)
+            changes.toggle_source(tag_name)
             change_treeview_item_text(
                 self.widgets.metadata_view,
                 iid=tag_iid,
-                text=changes.display(tag_key))
+                text=changes.display(tag_name))
+        #
+
+    def toggle_translation(self, event=None):
+        """Toggle the selected MusicBrainz tag translation"""
+        del event
+        tag_iid = self.widgets.translation_view.focus()
+        try:
+            locator = dict(
+                self.variables.metadata_translations[tag_iid])
+        except ValueError:
+            pass
+        else:
+            tag_name = locator.pop('tag_name')
+            translatable = self.variables.selected_mb_release.get_object(
+                **locator)
+            translatable.toggle_translation(tag_name)
+            change_treeview_item_text(
+                self.widgets.translation_view,
+                iid=tag_iid,
+                text=translatable.describe(tag_name))
         #
 
     def __show_errors(self):
@@ -949,11 +1132,22 @@ class UserInterface():
         else:
             self.variables.current_panel = self.variables.current_phase
         #
-        directory_display = tkinter.Label(
+        panel_display = tkinter.Label(
             self.widgets.action_area,
-            text='Selected directory: %r' % self.variables.directory_path.name,
+            text='%s (panel %s of %s)' % (
+                PANEL_NAMES[self.variables.current_panel],
+                PHASES.index(self.variables.current_panel),
+                len(PHASES) - 1),
             justify=tkinter.LEFT)
-        directory_display.grid(sticky=tkinter.W, padx=4, pady=2)
+        panel_display.grid(sticky=tkinter.W, padx=4, pady=2)
+        # TODO: show as a disabled entry (issue #22)
+# =============================================================================
+#         directory_display = tkinter.Label(
+#             self.widgets.action_area,
+#             text='Selected directory: %r' % self.variables.directory_path.name,
+#             justify=tkinter.LEFT)
+#         directory_display.grid(sticky=tkinter.W, padx=4, pady=2)
+# =============================================================================
         self.__show_errors()
         panel_method()
         self.widgets.action_area.grid(**self.grid_fullwidth)
@@ -965,6 +1159,7 @@ class UserInterface():
         buttons_grid = dict(padx=5, pady=5, row=0)
         if self.variables.current_phase in (
                 SELECT_MB_RELEASE,
+                CONFIRM_TRANSLATIONS,
                 CONFIRM_METADATA,
                 RENAME_OPTIONS,
                 CONFIRM_RENAME,
@@ -1057,8 +1252,9 @@ def main(arguments=None):
     if selected_directory and not selected_directory.is_dir():
         selected_directory = selected_directory.parent
     #
-    logging.basicConfig(format='%(levelname)-8s\u2551 %(message)s',
-                        level=loglevel)
+    logging.basicConfig(
+        format='%(levelname)-8s\u2551 %(funcName)s → %(message)s',
+        level=loglevel)
     try:
         selected_names = os.environ['NAUTILUS_SCRIPT_SELECTED_FILE_PATHS']
     except KeyError:
