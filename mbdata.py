@@ -85,14 +85,14 @@ class TrackNotFound(Exception):
 
 class Xlator(dict):
 
-    """All-in-one multiple-string-substitution class from
+    """All-in-one multiple-string-substitution class taken from
     <https://www.oreilly.com/library/view
      /python-cookbook/0596001673/ch03s15.html>
     """
 
     def _make_regex(self):
         """ Build re object based on the keys of the current dictionary """
-        return re.compile("|".join(map(re.escape, self.keys(  ))))
+        return re.compile("|".join(map(re.escape, self.keys())))
 
     def __call__(self, match):
         """ Handler invoked for each regex match """
@@ -113,18 +113,33 @@ class Translatable:
         self._replacements = {}
         self._use_replacements = {}
 
+    @property
+    def translated_tags(self):
+        """Return the names of all translated tags, sorted."""
+        return sorted(self._use_replacements.keys())
+
+    def describe(self, name):
+        """Describe the tag and its value for display purposes"""
+        if self._use_replacements.get(name, False):
+            return '%s is translated to %r' % (name, self._replacements[name])
+        #
+        return '%s is left unchanged at %r' % (name, self._metadata[name])
+
+    def toggle_translation(self, key):
+        """Toggle the use_replacements value"""
+        self._use_replacements[key] = not self._use_replacements[key]
+
     def translate(self, translator):
         """Translate all metadata contents"""
         if translator:
             for (key, value) in self._metadata.items():
-                self._replacements[key] = translator.xlat(value)
-                self._use_replacements[key] = True
+                replacement = translator.xlat(value)
+                if replacement != value:
+                    self._replacements[key] = replacement
+                    self._use_replacements[key] = True
+                #
             #
         #
-
-    def toggle_translation(self, key):
-        """Toggle the use_replacemtns value"""
-        self._use_replacements[key] = not self._use_replacements[key]
 
     def __getitem__(self, name):
         """Item access to metadata"""
