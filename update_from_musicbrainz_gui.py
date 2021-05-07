@@ -205,6 +205,7 @@ class UserInterface():
             current_phase=CHOOSE_LOCAL_RELEASE,
             current_panel=None,
             directory_path=directory_path,
+            directory_display=tkinter.StringVar(),
             disable_next_button=False,
             errors=[],
             mb_releases=[],
@@ -212,6 +213,7 @@ class UserInterface():
             metadata_changes={},
             metadata_lookup={},
             metadata_translations={},
+            panel_display=tkinter.StringVar(),
             changed_tracks={},
             fix_typography=tkinter.IntVar(),
             always_include_artist=tkinter.IntVar(),
@@ -224,6 +226,32 @@ class UserInterface():
             releases_view=None,
             result_view=None,
             scroll_vertical=None)
+        overview_frame = tkinter.Frame(self.main_window)
+        directory_label = tkinter.Label(
+            overview_frame,
+            text='Directory:')
+        directory_label.grid(
+            padx=4, pady=2, row=0, column=0, sticky=tkinter.W)
+        selected_directory = tkinter.Entry(
+            overview_frame,
+            width=60,
+            state=tkinter.DISABLED,
+            textvariable=self.variables.directory_display)
+        selected_directory.grid(
+            padx=4, pady=2, row=0, column=1, sticky=tkinter.W)
+        choose_button = tkinter.Button(
+            overview_frame,
+            text='Choose another …',
+            command=self.do_choose_local_release)
+        choose_button.grid(
+            padx=4, pady=4, row=0, column=2, sticky=tkinter.W)
+        panel_display = tkinter.Label(
+            overview_frame,
+            textvariable=self.variables.panel_display,
+            justify=tkinter.LEFT)
+        panel_display.grid(
+            padx=4, pady=4, row=1, column=0, columnspan=3, sticky=tkinter.W)
+        overview_frame.grid(**self.grid_fullwidth)
         self.do_choose_local_release(
             keep_existing=True,
             quit_on_empty_choice=True)
@@ -254,6 +282,8 @@ class UserInterface():
                 self.variables.directory_path = pathlib.Path(
                     selected_directory)
             #
+            self.variables.directory_display.set(
+                self.variables.directory_path.name)
             try:
                 self.variables.local_release = mbdata.local_release_from_path(
                     self.variables.directory_path)
@@ -521,7 +551,7 @@ class UserInterface():
             height=15,
             selectmode=tkinter.BROWSE,
             show='tree')
-        self.widgets.release_view.column('#0', width=500)
+        self.widgets.release_view.column('#0', width=700)
         self.widgets.release_view.bind(
             '<Double-Button-1>', self.open_selected_release)
         self.widgets.release_view.bind(
@@ -1132,22 +1162,11 @@ class UserInterface():
         else:
             self.variables.current_panel = self.variables.current_phase
         #
-        panel_display = tkinter.Label(
-            self.widgets.action_area,
-            text='%s (panel %s of %s)' % (
+        self.variables.panel_display.set(
+            '%s (panel %s of %s)' % (
                 PANEL_NAMES[self.variables.current_panel],
                 PHASES.index(self.variables.current_panel),
-                len(PHASES) - 1),
-            justify=tkinter.LEFT)
-        panel_display.grid(sticky=tkinter.W, padx=4, pady=2)
-        # TODO: show as a disabled entry (issue #22)
-# =============================================================================
-#         directory_display = tkinter.Label(
-#             self.widgets.action_area,
-#             text='Selected directory: %r' % self.variables.directory_path.name,
-#             justify=tkinter.LEFT)
-#         directory_display.grid(sticky=tkinter.W, padx=4, pady=2)
-# =============================================================================
+                len(PHASES) - 1))
         self.__show_errors()
         panel_method()
         self.widgets.action_area.grid(**self.grid_fullwidth)
@@ -1188,11 +1207,6 @@ class UserInterface():
             command=self.next_panel,
             state=next_button_state)
         next_button.grid(column=1, sticky=tkinter.W, **buttons_grid)
-        choose_button = tkinter.Button(
-            self.widgets.buttons_area,
-            text='Choose another release…',
-            command=self.do_choose_local_release)
-        choose_button.grid(column=2, sticky=tkinter.W, **buttons_grid)
         about_button = tkinter.Button(
             self.widgets.buttons_area,
             text='About…',
@@ -1203,6 +1217,7 @@ class UserInterface():
             text='Quit',
             command=self.quit)
         quit_button.grid(column=4, sticky=tkinter.E, **buttons_grid)
+        self.widgets.buttons_area.columnconfigure(2, weight=100)
         self.widgets.buttons_area.grid(**self.grid_fullwidth)
 
 
