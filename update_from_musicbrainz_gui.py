@@ -282,8 +282,6 @@ class UserInterface():
                 self.variables.directory_path = pathlib.Path(
                     selected_directory)
             #
-            self.variables.directory_display.set(
-                self.variables.directory_path.name)
             try:
                 self.variables.local_release = mbdata.local_release_from_path(
                     self.variables.directory_path)
@@ -295,6 +293,13 @@ class UserInterface():
                 keep_existing = False
                 continue
             #
+            total_number_of_tracks = sum(
+                medium.counted_tracks for medium in
+                self.variables.local_release.media_list)
+            self.variables.directory_display.set(
+                '%s (%s tracks)' % (
+                    self.variables.directory_path.name,
+                    total_number_of_tracks))
             self.variables.current_panel = CHOOSE_LOCAL_RELEASE
             self.next_panel()
             break
