@@ -480,12 +480,12 @@ class LocalTrackChanges:
             self.track.update_tags(**metadata_changes)
         #
         if self.__undo:
-            return self.__save()
+            return self.track.get_saved_changes()
         #
-        return {}
+        return []
 
     def rollback(self):
-        """roll back changes to the track.
+        """Roll back changes to the track.
         Return the changes as a list.
         """
         if not self.__undo:
@@ -516,20 +516,7 @@ class LocalTrackChanges:
             self.track.update_tags(**metadata_changes)
         #
         self.__undo.clear()
-        return self.__save()
-
-    def __save(self):
-        """Save changes to the file"""
-        applied_changes = []
-        logging.warning(
-            'Saved Metadata changes in %r:',
-            self.track.file_path.name)
-        for (key, (old_value, new_value)) in self.track.save_tags().items():
-            current_change = '%s: %r → %r' % (key, old_value, new_value)
-            logging.debug(current_change)
-            applied_changes.append(current_change)
-        #
-        return applied_changes
+        return self.track.get_saved_changes()
 
     def effective_value(self, key):
         """Return the effective value for key"""

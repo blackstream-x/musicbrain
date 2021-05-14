@@ -401,22 +401,20 @@ class UserInterface():
         """Prepare Metadata change"""
         # Build map of metadata changes per track
         self.variables.metadata_changes.clear()
-        for medium in self.variables.local_release.media_list:
-            for track in medium.tracks_list:
-                try:
-                    changes = mbdata.LocalTrackChanges(
-                        track, self.variables.selected_mb_release)
-                except (mbdata.MediumNotFound,
-                        mbdata.TrackNotFound) as error:
-                    logging.warning('Error on track %r: %s',
-                                    track.file_path.name,
-                                    error)
-                    continue
-                #
-                if changes:
-                    self.variables.metadata_changes[track.file_path.name] = \
-                        changes
-                #
+        for track in self.variables.local_release.get_all_tracks():
+            try:
+                changes = mbdata.LocalTrackChanges(
+                    track, self.variables.selected_mb_release)
+            except (mbdata.MediumNotFound,
+                    mbdata.TrackNotFound) as error:
+                logging.warning('Error on track %r: %s',
+                                track.file_path.name,
+                                error)
+                continue
+            #
+            if changes:
+                self.variables.metadata_changes[track.file_path.name] = \
+                    changes
             #
         #
         self.check_metadata_changes()
@@ -435,11 +433,19 @@ class UserInterface():
     def do_rename_options(self):
         """Execute the prepared Metadata change"""
         self.variables.changed_tracks.clear()
-        for (file_name, changes) in self.variables.metadata_changes.items():
-            applied_changes = changes.apply()
-            logging.debug(
-                'Applied changes for %r: %r', file_name, applied_changes)
+        for track in self.variables.local_release.get_all_tracks():
+            file_name = track.file_path.name
+            try:
+                changes = self.variables.metadata_changes[file_name]
+            except KeyError:
+                applied_changes = track.get_saved_changes(
+                    remark='fixed encoding')
+            else:
+                applied_changes = changes.apply()
+            #
             if applied_changes:
+                logging.debug(
+                    'Applied changes for %r: %r', file_name, applied_changes)
                 self.variables.changed_tracks[file_name] = applied_changes
             #
         #
@@ -453,16 +459,14 @@ class UserInterface():
     def do_confirm_rename(self):
         """Prepare file mass rename"""
         self.variables.renaming_plan = safer_mass_rename.RenamingPlan()
-        for medium in self.variables.local_release.media_list:
-            for track in medium.tracks_list:
-                self.variables.renaming_plan.add(
-                    track.file_path,
-                    track.suggested_filename(
-                        include_artist_name=bool(
-                            self.variables.always_include_artist.get()),
-                        include_medium_number=bool(
-                            self.variables.include_medium.get())))
-            #
+        for track in self.variables.local_release.get_all_tracks():
+            self.variables.renaming_plan.add(
+                track.file_path,
+                track.suggested_filename(
+                    include_artist_name=bool(
+                        self.variables.always_include_artist.get()),
+                    include_medium_number=bool(
+                        self.variables.include_medium.get())))
         #
         if not self.variables.renaming_plan:
             self.variables.errors.append('No files need to be renamed.')

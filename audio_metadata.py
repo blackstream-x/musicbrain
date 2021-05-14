@@ -269,6 +269,24 @@ class Track(SortableHashableMixin):
         #
         return ''
 
+    def get_saved_changes(self, remark=None):
+        """Save changes to the file and return a list of changes"""
+        applied_changes = []
+        logging.warning(
+            'Saved Metadata changes in %r:',
+            self.file_path.name)
+        for (key, (old_value, new_value)) in self.save_tags().items():
+            if remark:
+                current_change = '%s: %r → %r (%s)' % (
+                    key, old_value, new_value, remark)
+            else:
+                current_change = '%s: %r → %r' % (key, old_value, new_value)
+            #
+            logging.debug(current_change)
+            applied_changes.append(current_change)
+        #
+        return applied_changes
+
     def reset_sided_position(self):
         """Determine and set the sided position from the file name"""
         try:
@@ -978,6 +996,14 @@ class Release(SortableHashableMixin):
             medium_number)
         for track in medium.tracks_list:
             existing_medium.add_track(track)
+        #
+
+    def get_all_tracks(self):
+        """Yield all tracks in all media"""
+        for medium in self.media_list:
+            for track in medium.tracks_list:
+                yield track
+            #
         #
 
     def __getitem__(self, item):
