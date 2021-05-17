@@ -291,6 +291,7 @@ class UserInterface():
                     str(error),
                     icon=messagebox.ERROR)
                 keep_existing = False
+                preset_path = self.variables.directory_path
                 continue
             #
             total_number_of_tracks = sum(
