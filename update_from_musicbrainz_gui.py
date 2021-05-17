@@ -586,7 +586,7 @@ class UserInterface():
                 iid=single_release.id_,
                 text='%s, %s – (Score: %s)' % (
                     single_release.date or '<unknown date>',
-                    single_release.media_summary,
+                    single_release.summary,
                     single_release.score))
             #
             # Focus and select the first release

@@ -221,6 +221,26 @@ class Release(Translatable):
         #
         self.score = 0
         self.date = release_data.get('date')
+        self.disambiguation = release_data.get('disambiguation')
+        self.barcode = release_data.get('barcode')
+        self.label_data = None
+        label_info_list = release_data.get('label-info-list')
+        if label_info_list:
+            label_info = []
+            for single_info in label_info_list:
+                try:
+                    label_info.append(
+                        '%s %s' % (
+                            single_info['label']['name'],
+                            single_info['catalog-number']))
+                except KeyError:
+                    pass
+                #
+            #
+            if label_info:
+                self.label_data = ', '.join(label_info)
+            #
+        #
         super().__init__()
         self._metadata.update({
             ALBUM: release_data['title'],
@@ -235,7 +255,7 @@ class Release(Translatable):
         #
 
     @property
-    def media_summary(self):
+    def summary(self):
         """Summary of contained media with track counts"""
         seen_formats = {}
         for single_medium in self.media_list:
@@ -255,7 +275,17 @@ class Release(Translatable):
                     '%s (%s tracks)' % (format_name, track_counts[0]))
             #
         #
-        return ' + '.join(output_list)
+        release_info = [' + '.join(output_list)]
+        if self.label_data:
+            release_info.append(self.label_data)
+        #
+        if self.barcode:
+            release_info.append('UPC: %s' % self.barcode)
+        #
+        if self.disambiguation:
+            release_info.append(self.disambiguation)
+        #
+        return '; '.join(release_info)
 
     @property
     def translated_accessors(self):
