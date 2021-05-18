@@ -301,6 +301,7 @@ class UserInterface():
                 '%s (%s tracks)' % (
                     self.variables.directory_path.name,
                     total_number_of_tracks))
+            self.variables.mbid_entry.set('')
             self.variables.current_panel = CHOOSE_LOCAL_RELEASE
             self.next_panel()
             break
