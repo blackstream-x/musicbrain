@@ -215,6 +215,7 @@ class UserInterface():
             metadata_translations={},
             panel_display=tkinter.StringVar(),
             changed_tracks={},
+            ignore_mb_data=tkinter.IntVar(),
             fix_typography=tkinter.IntVar(),
             always_include_artist=tkinter.IntVar(),
             include_medium=tkinter.IntVar(),
@@ -380,6 +381,8 @@ class UserInterface():
                 return
             #
         #
+        self.variables.ignore_mb_data.set(0)
+        #
         # Translate tag values if typography fixes are required
         self.variables.selected_mb_release.clear_translations()
         if self.variables.fix_typography.get():
@@ -435,6 +438,9 @@ class UserInterface():
     def do_rename_options(self):
         """Execute the prepared Metadata change"""
         self.variables.changed_tracks.clear()
+        if self.variables.ignore_mb_data.get():
+            self.variables.metadata_changes.clear()
+        #
         for track in self.variables.local_release.get_all_tracks():
             file_name = track.file_path.name
             try:
@@ -777,6 +783,13 @@ class UserInterface():
             row=1, column=0)
         self.widgets.scroll_vertical.grid(
             row=1, column=1, sticky=tkinter.N+tkinter.S)
+        ignore_mb_metadata = tkinter.Checkbutton(
+            select_frame,
+            text='Skip all above metadata changes',
+            variable=self.variables.ignore_mb_data,
+            justify=tkinter.LEFT)
+        ignore_mb_metadata.grid(
+            row=2, column=0, columnspan=2, padx=4, sticky=tkinter.W)
         select_frame.grid(**self.grid_fullwidth)
 
     def panel_rename_options(self):
