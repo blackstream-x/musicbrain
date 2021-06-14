@@ -82,6 +82,10 @@ def __get_arguments():
         dest='loglevel',
         help='Limit message output to warnings and errors')
     argument_parser.add_argument(
+        '-p', '--parseable',
+        action='store_true',
+        help='Output tracks in a format parseable by MusicBrainz')
+    argument_parser.add_argument(
         'release_id',
         type=mbid,
         help='A string containing the MusicBrainz ID of the release.')
@@ -118,14 +122,22 @@ def main(arguments):
         track_count = medium_data['track-count']
         for track_data in medium_data['track-list']:
             # LOGGER.debug(repr(list(track_data)))
-            print(
-                '%2s/%02d | %s. %s – %s (%s)' % (
-                    track_data['position'],
-                    track_count,
+            if arguments.parseable:
+                print('%s. %s – %s (%s)' % (
                     track_data['number'],
-                    track_data['artist-credit-phrase'],
                     track_data['recording']['title'],
+                    track_data['artist-credit-phrase'],
                     time_display(int(track_data['length']))))
+            else:
+                print(
+                    '%2s/%02d | %s. %s – %s (%s)' % (
+                        track_data['position'],
+                        track_count,
+                        track_data['number'],
+                        track_data['artist-credit-phrase'],
+                        track_data['recording']['title'],
+                        time_display(int(track_data['length']))))
+                #
         #
     #
     return RETURNCODE_OK
