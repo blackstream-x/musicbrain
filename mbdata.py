@@ -680,9 +680,16 @@ def releases_from_search(album=None,
     query_result = musicbrainzngs.search_releases(
         query=' AND '.join(search_criteria))
     #
-    return [
-        Release(single_release, score_calculation=score_calculation)
-        for single_release in query_result['release-list']]
+    found_releases = []
+    for single_release in query_result['release-list']:
+        try:
+            found_releases.append(
+                Release(single_release, score_calculation=score_calculation))
+        except KeyError as key_error:
+            # ignore releases lacking e.g. media
+            logging.warning('Missing key in metadata: %s', key_error)
+        #
+    return found_releases
 
 
 # vim: fileencoding=utf-8 ts=4 sts=4 sw=4 autoindent expandtab syntax=python:
