@@ -432,7 +432,7 @@ class UserInterface():
         #
         self.variables.errors.append(
             'No differences found in metadata.\n'
-            'Hitting "next" will not do any changes.')
+            'Hitting “next” will just fix any wrong tag encodings.')
         return False
 
     def do_rename_options(self):
@@ -557,7 +557,7 @@ class UserInterface():
         release_iids = {}
         label = tkinter.Label(
             select_frame,
-            text='Please select a release and hit the "next" button'
+            text='Please select a release and hit the “next” button'
             ' to continue.\n'
             'Double-click a release to open its MusicBrainz page'
             ' in your web browser.',

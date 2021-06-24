@@ -509,10 +509,7 @@ class LocalTrackChanges:
         if metadata_changes:
             self.track.update_tags(**metadata_changes)
         #
-        if self.__undo:
-            return self.track.get_saved_changes()
-        #
-        return []
+        return self.track.get_saved_changes()
 
     def rollback(self):
         """Roll back changes to the track.
