@@ -591,10 +591,10 @@ class UserInterface():
                 parent_iid,
                 tkinter.END,
                 iid=single_release.id_,
-                text='%s, %s – (Score: %s)' % (
+                text='[%s%%] %s, %s' % (
+                    single_release.score,
                     single_release.date or '<unknown date>',
-                    single_release.summary,
-                    single_release.score))
+                    single_release.summary))
             #
             # Focus and select the first release
             if not self.widgets.release_view.focus():
