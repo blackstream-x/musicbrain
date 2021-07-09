@@ -91,9 +91,13 @@ PANEL_NAMES = {
     CONFIRM_RENAME: 'Confirm files renaming',
     RENAME_FILES: 'View files renaming results'}
 
-REPLACEMENTS = mbdata.Xlator({
+# MusicBrainz metadata replacements
+SIMPLE_REPLACEMENTS = mbdata.Xlator({
     "'": '\u2019',
     "...": '\u2026'})
+
+QUOTES_AS_INCH = mbdata.RegexTranslator(
+    '(?!<\\w)(7|10|12)"', '\\1\u2033')
 
 
 #
@@ -386,7 +390,8 @@ class UserInterface():
         # Translate tag values if typography fixes are required
         self.variables.selected_mb_release.clear_translations()
         if self.variables.fix_typography.get():
-            self.variables.selected_mb_release.translate(REPLACEMENTS)
+            self.variables.selected_mb_release.translate(
+                SIMPLE_REPLACEMENTS, QUOTES_AS_INCH)
         #
         # Directly jump to the next panel if no translations are found
         if not self.check_translations():

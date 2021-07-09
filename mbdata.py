@@ -104,6 +104,20 @@ class Xlator(dict):
         return self._make_regex().sub(self, text)
 
 
+class RegexTranslator:
+
+    """Simple regex-wrapper class"""
+
+    def __init__(self, regex, replacement):
+        """Compile the regex and store the replacement"""
+        self.__prx = re.compile(regex)
+        self.__replacement = replacement
+
+    def xlat(self, text):
+        """Translate text, returns the modified text."""
+        return self.__prx.sub(self.__replacement, text)
+
+
 class Translatable:
 
     """Translatable metadata"""
@@ -135,11 +149,14 @@ class Translatable:
         """Toggle the use_replacements value"""
         self._use_replacements[key] = not self._use_replacements[key]
 
-    def translate(self, translator):
+    def translate(self, *translators):
         """Translate all metadata contents"""
-        if translator:
+        if translators:
             for (key, value) in self._metadata.items():
-                replacement = translator.xlat(value)
+                replacement = value
+                for single_translator in translators:
+                    replacement = single_translator.xlat(replacement)
+                #
                 if replacement != value:
                     self._replacements[key] = replacement
                     self._use_replacements[key] = True
@@ -358,12 +375,12 @@ class Release(Translatable):
         for (medium_index, medium) in enumerate(self.media_list):
             yield (medium_index + 1, medium)
 
-    def translate(self, translator):
+    def translate(self, *translators):
         """Translate own metadata and those of all tracks"""
-        super().translate(translator)
+        super().translate(*translators)
         for medium in self.media_list:
             for track in medium.tracks_list:
-                track.translate(translator)
+                track.translate(*translators)
             #
         #
 
