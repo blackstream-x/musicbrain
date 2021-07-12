@@ -84,38 +84,58 @@ class TrackNotFound(Exception):
     ...
 
 
-class Xlator(dict):
+class Translator:
 
-    """All-in-one multiple-string-substitution class taken from
-    <https://www.oreilly.com/library/view
-     /python-cookbook/0596001673/ch03s15.html>
-    """
+    """Translator class for one replacement"""
 
-    def _make_regex(self):
-        """ Build re object based on the keys of the current dictionary """
-        return re.compile("|".join(map(re.escape, self.keys())))
+    def __init__(self, original, replacement, description=''):
+        """Store original, replacement and description"""
+        self.original = original
+        self.replacement = replacement
+        self.description = description
 
-    def __call__(self, match):
-        """ Handler invoked for each regex match """
-        return self[match.group(0)]
-
-    def xlat(self, text):
-        """ Translate text, returns the modified text. """
-        return self._make_regex().sub(self, text)
-
-
-class RegexTranslator:
-
-    """Simple regex-wrapper class"""
-
-    def __init__(self, regex, replacement):
-        """Compile the regex and store the replacement"""
-        self.__prx = re.compile(regex)
-        self.__replacement = replacement
-
-    def xlat(self, text):
+    def translate(self, text):
         """Translate text, returns the modified text."""
-        return self.__prx.sub(self.__replacement, text)
+        return text.replace(self.original, self.replacement)
+
+
+class RegexTranslator(Translator):
+
+    """Translator subclass using a regular expression"""
+
+    def __init__(self, original, replacement, description=''):
+        """Compile the regex"""
+        super().__init__(None, replacement, description=description)
+        self.__prx = re.compile(original)
+
+    def translate(self, text):
+        """Translate text, returns the modified text."""
+        return self.__prx.sub(self.replacement, text)
+
+
+class TranslatorChain:
+
+    """Chain of translator objects applied sequentially"""
+
+    def __init__(self, *translators):
+        """Keep a sequence of translators"""
+        self.__translators = list(translators)
+
+    def append(self, single_translator):
+        """Append a translator"""
+        self.__translators.append(single_translator)
+
+    def translate(self, text):
+        """Apply the translations sequentially"""
+        result = text
+        for single_translator in self.__translators:
+            result = single_translator.translate(result)
+        #
+        return result
+
+    def __len__(self):
+        """Number of translators"""
+        return len(self.__translators)
 
 
 class Translatable:
@@ -149,14 +169,11 @@ class Translatable:
         """Toggle the use_replacements value"""
         self._use_replacements[key] = not self._use_replacements[key]
 
-    def translate(self, *translators):
+    def translate(self, translator):
         """Translate all metadata contents"""
-        if translators:
+        if translator:
             for (key, value) in self._metadata.items():
-                replacement = value
-                for single_translator in translators:
-                    replacement = single_translator.xlat(replacement)
-                #
+                replacement = translator.translate(value)
                 if replacement != value:
                     self._replacements[key] = replacement
                     self._use_replacements[key] = True

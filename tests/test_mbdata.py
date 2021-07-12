@@ -17,35 +17,30 @@ class TestSimple(unittest.TestCase):
 
     def test_translate_text(self):
         """Test text translations"""
-        replacements = mbdata.Xlator({
-            "'": '\u2019',
-            "...": '\u2026'})
+        replacements = mbdata.TranslatorChain(
+            mbdata.Translator("'", '\u2019'),
+            mbdata.Translator("...", '\u2026'))
         self.assertEqual(
-            replacements.xlat("It's a Sin..."),
+            replacements.translate("It's a Sin..."),
             'It’s a Sin…')
 
     def test_translate_regex(self):
         """Test text translations"""
-        replacements = mbdata.Xlator({
-            "'": '\u2019',
-            "...": '\u2026'})
-        regex_replacement = mbdata.RegexTranslator(
-            '(?!<\\w)(7|10|12)"', '\\1\u2033')
+        replacements = mbdata.TranslatorChain(
+            mbdata.Translator("'", '\u2019'),
+            mbdata.Translator("...", '\u2026'),
+            mbdata.RegexTranslator('(?!<\\w)(7|10|12)"', '\\1\u2033'))
         self.assertEqual(
-            regex_replacement.xlat(
-                replacements.xlat("""It's a Sin... (7" edit)""")),
+            replacements.translate("""It's a Sin... (7" edit)"""),
             'It’s a Sin… (7″ edit)')
         self.assertEqual(
-            regex_replacement.xlat(
-                replacements.xlat("""It's a Sin... (10" version)""")),
+            replacements.translate("""It's a Sin... (10" version)"""),
             'It’s a Sin… (10″ version)')
         self.assertEqual(
-            regex_replacement.xlat(
-                replacements.xlat("""It's a Sin... (12" remix)""")),
+            replacements.translate("""It's a Sin... (12" remix)"""),
             'It’s a Sin… (12″ remix)')
         self.assertEqual(
-            regex_replacement.xlat(
-                replacements.xlat("""It's a Sin... ("keep quotes" mix)""")),
+            replacements.translate("""It's a Sin... ("keep quotes" mix)"""),
             'It’s a Sin… ("keep quotes" mix)')
 
 

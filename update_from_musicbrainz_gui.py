@@ -92,13 +92,34 @@ PANEL_NAMES = {
     RENAME_FILES: 'View files renaming results'}
 
 # MusicBrainz metadata replacements
-SIMPLE_REPLACEMENTS = mbdata.Xlator({
-    "'": '\u2019',
-    "...": '\u2026'})
 
-QUOTES_AS_INCH = mbdata.RegexTranslator(
-    '(?!<\\w)(7|10|12)"', '\\1\u2033')
-
+TYPOGRAPHY_FIXES = dict(
+    single_quotes=mbdata.RegexTranslator(
+        r"(?!<\w)'(.+?)'(?!\w)", r"‘\1’",
+        description="Neutral single quotes around text"
+        " → typographic quotes ('abc' → ‘abc’;"
+        " might misinterpret “Rock 'n' Roll”)"),
+    double_quotes=mbdata.RegexTranslator(
+        r'(?!<\w)"(.+?)"(?!\w)', r"‘\1’",
+        description='Neutral double quotes around text'
+        ' → typographic quotes ("xyz" → “xyz”)'),
+    quotes_as_inch=mbdata.RegexTranslator(
+        r'(?!<\w)(7|10|12)"', '\\1\u2033',
+        description='Neutral double quote directly after 7, 10 or 12'
+        ' → inch sign (7" → 7″, 10" → 10″, 12" → 12″)'),
+    three_or_more_dots=mbdata.RegexTranslator(
+        r'\.{3,}', '\u2026',
+        description='Three or more consecutive dots'
+        ' → horizontal ellipsis (eg. ..... → …)'),
+    exactly_three_dots=mbdata.Translator(
+        '...', '\u2026',
+        description='Exactly three consecutive dots'
+        ' → horizontal ellipsis (... → …)'),
+    apostrophe=mbdata.Translator(
+        "'", '\u2019',
+        description="Typewriter apostrophe"
+        " → typesetter’s apostrophe (' → ’)"),
+)
 
 #
 # Helper Functions
@@ -220,17 +241,25 @@ class UserInterface():
             panel_display=tkinter.StringVar(),
             changed_tracks={},
             ignore_mb_data=tkinter.IntVar(),
-            fix_typography=tkinter.IntVar(),
+            # fix_typography=tkinter.IntVar(),
             always_include_artist=tkinter.IntVar(),
             include_medium=tkinter.IntVar(),
-            rename_result=None)
+            rename_result=None,
+            typography_fixes=[
+                ('single_quotes', tkinter.IntVar(value=0)),
+                ('apostrophe', tkinter.IntVar(value=1)),
+                ('quotes_as_inch', tkinter.IntVar(value=1)),
+                ('double_quotes', tkinter.IntVar(value=1)),
+                ('three_or_more_dots', tkinter.IntVar(value=0)),
+                ('exactly_three_dots', tkinter.IntVar(value=1))])
         self.widgets = Namespace(
             action_area=None,
             buttons_area=None,
             metadata_view=None,
             releases_view=None,
             result_view=None,
-            scroll_vertical=None)
+            scroll_vertical=None,
+            typography_fixes={})
         overview_frame = tkinter.Frame(self.main_window)
         directory_label = tkinter.Label(
             overview_frame,
@@ -389,9 +418,13 @@ class UserInterface():
         #
         # Translate tag values if typography fixes are required
         self.variables.selected_mb_release.clear_translations()
-        if self.variables.fix_typography.get():
-            self.variables.selected_mb_release.translate(
-                SIMPLE_REPLACEMENTS, QUOTES_AS_INCH)
+        replacements = mbdata.TranslatorChain()
+        for (fix_name, is_selected) in self.variables.typography_fixes:
+            if is_selected.get():
+                replacements.append(TYPOGRAPHY_FIXES[fix_name])
+            #
+        #
+        self.variables.selected_mb_release.translate(replacements)
         #
         # Directly jump to the next panel if no translations are found
         if not self.check_translations():
@@ -617,15 +650,32 @@ class UserInterface():
             row=1, column=0)
         self.widgets.scroll_vertical.grid(
             row=1, column=1, sticky=tkinter.N+tkinter.S)
-        fix_typography = tkinter.Checkbutton(
-            select_frame,
-            text='Fix typography in Metadata',
-            variable=self.variables.fix_typography,
-            justify=tkinter.LEFT)
-        fix_typography.grid(
-            row=2, column=0, columnspan=2, padx=4, sticky=tkinter.W)
-        fix_typography.select()
         select_frame.grid(**self.grid_fullwidth)
+        typo_fix_frame = tkinter.Frame(
+            self.widgets.action_area,
+            **self.with_border)
+        current_row = 0
+        typo_fix_heading = tkinter.Label(
+            typo_fix_frame,
+            text='Apply typographic fixes in the following order:',
+            justify=tkinter.LEFT)
+        typo_fix_heading.grid(
+            row=current_row, column=0, padx=4, sticky=tkinter.W)
+        for (fix_name, is_active) in self.variables.typography_fixes:
+            current_row += 1
+            checkbox = tkinter.Checkbutton(
+                typo_fix_frame,
+                text=TYPOGRAPHY_FIXES[fix_name].description,
+                variable=is_active)
+            # for re-ordering:
+            # self.widgets.typography_fixes[fix_name] = checkbox
+            checkbox.grid(
+                row=current_row,
+                column=0,
+                padx=4,
+                sticky=tkinter.W)
+        #
+        typo_fix_frame.grid(**self.grid_fullwidth)
 
     def panel_confirm_translations(self):
         """Panel with Metadata translations display"""
