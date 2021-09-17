@@ -47,11 +47,23 @@ if SCRIPT_PATH.is_symlink():
 #
 
 LICENSE_PATH = SCRIPT_PATH.parent / 'LICENSE'
-try:
-    LICENSE_TEXT = LICENSE_PATH.read_text()
-except OSError as error:
-    LICENSE_TEXT = '(License file is missing: %s)' % error
-#
+COPYRIGHT_NOTICE = """Copyright (C) 2021 Rainer Schwarzbach
+
+This file is part of musicbrain.
+
+musicbrain is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+musicbrain is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with musicbrain (see LICENSE).
+If not, see <http://www.gnu.org/licenses/>."""
 
 VERSION_PATH = SCRIPT_PATH.parent / 'version.txt'
 try:
@@ -1146,7 +1158,7 @@ class UserInterface():
             (SCRIPT_NAME,
              'Version: {0}\nProject homepage: {1}'.format(
                 VERSION, HOMEPAGE)),
-            ('License:', LICENSE_TEXT),
+            ('Copyright/License:', COPYRIGHT_NOTICE),
             title='About…')
         #
 
