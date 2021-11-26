@@ -112,7 +112,7 @@ TYPOGRAPHY_FIXES = dict(
         " → typographic quotes ('abc' → ‘abc’;"
         " might misinterpret “Rock 'n' Roll”)"),
     double_quotes=mbdata.RegexTranslator(
-        r'(?!<\w)"(.+?)"(?!\w)', r"‘\1’",
+        r'(?!<\w)"(.+?)"(?!\w)', r"“\1”",
         description='Neutral double quotes around text'
         ' → typographic quotes ("xyz" → “xyz”)'),
     quotes_as_inch=mbdata.RegexTranslator(
