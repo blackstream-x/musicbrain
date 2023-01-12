@@ -36,33 +36,39 @@ class TestSimple(unittest.TestCase):
     def test_translate_text(self):
         """Test text translations"""
         replacements = mbdata.TranslatorChain(
-            mbdata.Translator("'", '\u2019'),
-            mbdata.Translator("...", '\u2026'))
+            mbdata.Translator("'", "\u2019"),
+            mbdata.Translator("...", "\u2026"),
+        )
         self.assertEqual(
-            replacements.translate("It's a Sin..."),
-            'It’s a Sin…')
+            replacements.translate("It's a Sin..."), "It’s a Sin…"
+        )
 
     def test_translate_regex(self):
         """Test text translations"""
         replacements = mbdata.TranslatorChain(
-            mbdata.Translator("'", '\u2019'),
-            mbdata.Translator("...", '\u2026'),
-            mbdata.RegexTranslator('(?!<\\w)(7|10|12)"', '\\1\u2033'))
+            mbdata.Translator("'", "\u2019"),
+            mbdata.Translator("...", "\u2026"),
+            mbdata.RegexTranslator('(?!<\\w)(7|10|12)"', "\\1\u2033"),
+        )
         self.assertEqual(
             replacements.translate("""It's a Sin... (7" edit)"""),
-            'It’s a Sin… (7″ edit)')
+            "It’s a Sin… (7″ edit)",
+        )
         self.assertEqual(
             replacements.translate("""It's a Sin... (10" version)"""),
-            'It’s a Sin… (10″ version)')
+            "It’s a Sin… (10″ version)",
+        )
         self.assertEqual(
             replacements.translate("""It's a Sin... (12" remix)"""),
-            'It’s a Sin… (12″ remix)')
+            "It’s a Sin… (12″ remix)",
+        )
         self.assertEqual(
             replacements.translate("""It's a Sin... ("keep quotes" mix)"""),
-            'It’s a Sin… ("keep quotes" mix)')
+            'It’s a Sin… ("keep quotes" mix)',
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
 
 
