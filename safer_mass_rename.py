@@ -40,12 +40,12 @@ import uuid
 
 
 # Possible state values
-READY = 'ready'
-INDIRECTION_REQUIRED = 'indirection required'
-INDIRECTION_IN_PROGRESS = 'indirection in progress'
-INDIRECTION_FAILED = 'indirection failed'
-DONE = 'done'
-NO_RENAME_REQUIRED = 'no rename required'
+READY = "ready"
+INDIRECTION_REQUIRED = "indirection required"
+INDIRECTION_IN_PROGRESS = "indirection in progress"
+INDIRECTION_FAILED = "indirection failed"
+DONE = "done"
+NO_RENAME_REQUIRED = "no rename required"
 
 
 #
@@ -57,14 +57,10 @@ class DuplicateSourcePath(Exception):
 
     """Raised when a target path already exists in a plan"""
 
-    ...
-
 
 class DuplicateTargetPath(Exception):
 
     """Raised when a target path already exists in a plan"""
-
-    ...
 
 
 class FinalRenameRequired(Exception):
@@ -73,16 +69,12 @@ class FinalRenameRequired(Exception):
     and the final rename is required
     """
 
-    ...
-
 
 class DestinationPathExists(Exception):
 
     """Raised when a destination path already exists
     while trying to rename
     """
-
-    ...
 
 
 #
@@ -101,15 +93,16 @@ class RenameItem:
         normalizing paths and eliminating symlinks
         """
         self.__source_path = pathlib.Path(
-            os.path.realpath(
-                os.path.normpath(source_path)))
+            os.path.realpath(os.path.normpath(source_path))
+        )
         if not self.__source_path.is_absolute():
-            raise ValueError('The source path must be absolute!')
+            raise ValueError("The source path must be absolute!")
         #
         if not self.__source_path.is_file():
             raise ValueError(
-                'Source path %r is not an existing file' % str(
-                    self.__source_path))
+                "Source path %r is not an existing file"
+                % str(self.__source_path)
+            )
         #
         self.__target_path = self.__source_path.parent / target_file_name
         self.__intermediate_path = None
@@ -142,21 +135,24 @@ class RenameItem:
                 raise DestinationPathExists
             #
             logging.debug(
-                'Target file %r exists, but is overwritten on demand',
-                target.name)
+                "Target file %r exists, but is overwritten on demand",
+                target.name,
+            )
         #
-        logging.debug('Renaming %r to %r', source.name, target.name)
+        logging.debug("Renaming %r to %r", source.name, target.name)
         source.rename(target)
 
     def do_rename(self, overwrite_allowed=None):
         """Rename source path to target_path"""
         if self.state != READY:
-            raise ValueError('Illegal state %r' % self.state)
+            raise ValueError("Illegal state %r" % self.state)
         #
         try:
-            self.__rename_path(self.source_path,
-                               self.target_path,
-                               overwrite_allowed=overwrite_allowed)
+            self.__rename_path(
+                self.source_path,
+                self.target_path,
+                overwrite_allowed=overwrite_allowed,
+            )
         except DestinationPathExists:
             self.__state = INDIRECTION_REQUIRED
             raise
@@ -170,10 +166,13 @@ class RenameItem:
         """
         while True:
             new_path = self.source_path.parent / (
-                '%s.%s%s' % (
+                "%s.%s%s"
+                % (
                     self.source_path.stem,
                     uuid.uuid4(),
-                    self.source_path.suffix))
+                    self.source_path.suffix,
+                )
+            )
             if new_path.exists():
                 continue
             #
@@ -185,31 +184,31 @@ class RenameItem:
         if the target path already exists
         """
         if self.state not in (INDIRECTION_REQUIRED, INDIRECTION_IN_PROGRESS):
-            raise ValueError('Illegal state %r' % self.state)
+            raise ValueError("Illegal state %r" % self.state)
         #
         if self.state == INDIRECTION_REQUIRED:
             # Pass 1 (INDIRECTION_REQUIRED)
             self.__intermediate_path = self.make_intermediate_path()
-            self.__rename_path(self.source_path,
-                               self.__intermediate_path)
+            self.__rename_path(self.source_path, self.__intermediate_path)
             self.__state = INDIRECTION_IN_PROGRESS
             raise FinalRenameRequired
         #
         # Pass 2 (INDIRECTION_IN_PROGRESS)
         try:
-            self.__rename_path(self.__intermediate_path,
-                               self.target_path,
-                               overwrite_allowed=overwrite_allowed)
+            self.__rename_path(
+                self.__intermediate_path,
+                self.target_path,
+                overwrite_allowed=overwrite_allowed,
+            )
         except DestinationPathExists:
             try:
-                self.__rename_path(self.__intermediate_path,
-                                   self.source_path)
+                self.__rename_path(self.__intermediate_path, self.source_path)
             except DestinationPathExists:
                 logging.warning(
-                    'Possible race condition:'
-                    ' cannot rename %r back to %r.',
+                    "Possible race condition: cannot rename %r back to %r.",
                     self.__intermediate_path.name,
-                    self.source_path.name)
+                    self.source_path.name,
+                )
             #
             self.__state = INDIRECTION_FAILED
             raise
@@ -223,39 +222,35 @@ class MassRenamingResult:
 
     def __init__(self):
         """Set attributes"""
-        self.__data = dict(
-            renamed_files=[],
-            conflicts=[],
-            errors=[])
+        self.__data = dict(renamed_files=[], conflicts=[], errors=[])
 
     def add_success(self, item):
         """Add the RenameItem in case of successful renaming"""
-        self.__data['renamed_files'].append(item)
+        self.__data["renamed_files"].append(item)
 
     def add_conflict(self, item):
         """Add the RenameItem in case of a conflict"""
-        self.__data['conflicts'].append(item)
+        self.__data["conflicts"].append(item)
 
     def add_error(self, item, error):
         """Add an error for the Rename item"""
-        self.__data['errors'].append((item, error))
+        self.__data["errors"].append((item, error))
 
     def get_conflict_messages(self):
         """Return a list of error messages"""
         return [
-            'Conflict renaming %r to %r: target path exists already' % (
-                item.source_path.name,
-                item.target_path.name)
-            for item in self.conflicts]
+            "Conflict renaming %r to %r: target path exists already"
+            % (item.source_path.name, item.target_path.name)
+            for item in self.conflicts
+        ]
 
     def get_error_messages(self):
         """Return a list of error messages"""
         return [
-            'Error renaming %r to %r: %s' % (
-                item.source_path.name,
-                item.target_path.name,
-                error)
-            for (item, error) in self.errors]
+            "Error renaming %r to %r: %s"
+            % (item.source_path.name, item.target_path.name, error)
+            for (item, error) in self.errors
+        ]
 
     def __getattr__(self, name):
         """Return lists from the internal dict as a tuple"""
@@ -263,18 +258,18 @@ class MassRenamingResult:
             return tuple(self.__data[name])
         except KeyError as error:
             raise AttributeError(
-                '%r object has no attribute %r' % (
-                    self.__class__.__name__, name)) from error
+                "%r object has no attribute %r"
+                % (self.__class__.__name__, name)
+            ) from error
         #
 
     def __str__(self):
         """String representation"""
         return (
-            'Renaming result:\n'
-            '%s files renamed, %s conflicts, %s errors.' % (
-                len(self.renamed_files),
-                len(self.conflicts),
-                len(self.errors)))
+            "Renaming result:\n"
+            "%s files renamed, %s conflicts, %s errors."
+            % (len(self.renamed_files), len(self.conflicts), len(self.errors))
+        )
 
 
 class RenamingPlan:
@@ -299,12 +294,16 @@ class RenamingPlan:
     def add(self, source_path, target_file_name):
         """Add the renaming of source_path to target_file_name"""
         rename_item = RenameItem(source_path, target_file_name)
-        if rename_item.source_path \
-                in self.source_paths | self.__unchanged_paths:
+        if (
+            rename_item.source_path
+            in self.source_paths | self.__unchanged_paths
+        ):
             raise DuplicateSourcePath
         #
-        if rename_item.target_path \
-                in self.target_paths | self.__unchanged_paths:
+        if (
+            rename_item.target_path
+            in self.target_paths | self.__unchanged_paths
+        ):
             raise DuplicateTargetPath
         #
         if rename_item.state == NO_RENAME_REQUIRED:
@@ -335,12 +334,13 @@ class RenamingPlan:
         #
         # Resolve conflicts by using unique name appendices
         if resolver_queue:
-            logging.debug('Trying to resolve name conflicts …')
+            logging.debug("Trying to resolve name conflicts …")
             while resolver_queue:
                 current_item = resolver_queue.popleft()
                 try:
                     current_item.rename_conflicting(
-                        overwrite_allowed=overwrite_allowed)
+                        overwrite_allowed=overwrite_allowed
+                    )
                 except DestinationPathExists:
                     result.add_conflict(current_item)
                 except FinalRenameRequired:

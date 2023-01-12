@@ -58,33 +58,41 @@ RETURNCODE_ERROR = 1
 def __get_arguments():
     """Parse command line arguments"""
     argument_parser = argparse.ArgumentParser(
-        description='Print a tracklist from the release in a directory')
+        description="Print a tracklist from the release in a directory"
+    )
     argument_parser.set_defaults(loglevel=dialog.logging.INFO)
     argument_parser.add_argument(
-        '-v', '--verbose',
-        action='store_const',
+        "-v",
+        "--verbose",
+        action="store_const",
         const=dialog.logging.DEBUG,
-        dest='loglevel',
-        help='Output all messages including debug level')
+        dest="loglevel",
+        help="Output all messages including debug level",
+    )
     argument_parser.add_argument(
-        '-q', '--quiet',
-        action='store_const',
+        "-q",
+        "--quiet",
+        action="store_const",
         const=dialog.logging.WARNING,
-        dest='loglevel',
-        help='Limit message output to warnings and errors')
+        dest="loglevel",
+        help="Limit message output to warnings and errors",
+    )
     argument_parser.add_argument(
-        '--fix-tag-encoding',
-        action='store_true',
-        help='Fix tag encoding if required.'
-        ' This functionality is currently DISABLED and will be'
-        ' implemented in a separate script.')
+        "--fix-tag-encoding",
+        action="store_true",
+        help="Fix tag encoding if required."
+        " This functionality is currently DISABLED and will be"
+        " implemented in a separate script.",
+    )
     argument_parser.add_argument(
-        '-d', '--directory',
+        "-d",
+        "--directory",
         type=pathlib.Path,
         default=pathlib.Path.cwd(),
-        help='A directory to print the tracklist from'
-        ' (defaults to the current directory, in this case:'
-        '%(default)s)')
+        help="A directory to print the tracklist from"
+        " (defaults to the current directory, in this case:"
+        "%(default)s)",
+    )
     return argument_parser.parse_args()
 
 
@@ -102,7 +110,7 @@ def main(arguments):
     return RETURNCODE_OK
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Call main() with the provided command line arguments
     # and exit with its returncode
     sys.exit(main(__get_arguments()))

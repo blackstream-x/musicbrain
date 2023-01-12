@@ -32,43 +32,6 @@ import safer_mass_rename
 #
 
 
-SCRIPT_NAME = "Rename by Sides GUI"
-HOMEPAGE = "https://github.com/blackstream-x/musicbrain"
-MAIN_WINDOW_TITLE = "musicbrain: Rename tracks according to media sides"
-
-SCRIPT_PATH = pathlib.Path(sys.argv[0])
-# Follow symlinks
-if SCRIPT_PATH.is_symlink():
-    SCRIPT_PATH = SCRIPT_PATH.readlink()
-#
-
-LICENSE_PATH = SCRIPT_PATH.parent / "LICENSE"
-COPYRIGHT_NOTICE = """Copyright (C) 2021 Rainer Schwarzbach
-
-This file is part of musicbrain.
-
-musicbrain is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-musicbrain is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with musicbrain (see LICENSE).
-If not, see <http://www.gnu.org/licenses/>."""
-
-VERSION_PATH = SCRIPT_PATH.parent / "version.txt"
-try:
-    VERSION = VERSION_PATH.read_text().strip()
-except OSError as os_error:
-    VERSION = f"(Version file is missing: {os_error})"
-#
-
-
 #
 # Classes
 #
@@ -113,14 +76,16 @@ class ReleaseData:
         )
 
 
-class UserInterface:
+class UserInterface(gui_commons.UserInterface):
 
     """GUI using tkinter"""
 
+    script_name = "Rename by Sides GUI"
+    window_title = "musicbrain: Rename tracks according to media sides"
+
     def __init__(self, directory_path):
         """Build the GUI"""
-        self.main_window = tkinter.Tk()
-        self.main_window.title(MAIN_WINDOW_TITLE)
+        super().__init__()
         description_text = (
             "Use the slider to set the number of tracks"
             " on the first side of the selected medium."
@@ -154,6 +119,50 @@ class UserInterface:
         self.choose_release(keep_existing=True, quit_on_empty_choice=True)
         self.__add_buttonarea()
         self.main_window.mainloop()
+
+    def __add_medium_side_frame(self, side_index: int) -> None:
+        """Add one medium side frame"""
+        side_frame = tkinter.Frame(
+            self.action_frame,
+            borderwidth=2,
+            padx=5,
+            pady=5,
+            relief=tkinter.GROOVE,
+        )
+        # side_frame.columnconfigure(0, weight=1)
+        side_frame.columnconfigure(1, weight=1)
+        side_name_entry = tkinter.Entry(
+            side_frame,
+            textvariable=self.side_data[side_index].name,
+            width=4,
+            justify=tkinter.LEFT,
+        )
+        side_name_entry.grid(row=0, column=0, padx=4, sticky=tkinter.W)
+        side_name_entry.bind("<KeyRelease>", self.set_sides_event_wrapper)
+        side_length = tkinter.Label(
+            side_frame,
+            textvariable=self.side_data[side_index].length,
+            justify=tkinter.LEFT,
+        )
+        side_length.grid(row=0, column=1, padx=4, sticky=tkinter.W)
+        side_tracks = tkinter.Label(
+            side_frame,
+            textvariable=self.side_data[side_index].tracks,
+            justify=tkinter.LEFT,
+        )
+        side_tracks.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            padx=4,
+            sticky=tkinter.W + tkinter.N,
+        )
+        side_frame.grid(
+            row=7,
+            column=2 * side_index,
+            columnspan=3,
+            sticky=tkinter.N + tkinter.W + tkinter.E + tkinter.S,
+        )
 
     def __add_action_frame(self):
         """Add the action area"""
@@ -226,47 +235,7 @@ class UserInterface:
         )
         slider_reset_button.grid(row=6, column=0, padx=4, sticky=tkinter.E)
         for side_index in (0, 1):
-            side_frame = tkinter.Frame(
-                self.action_frame,
-                borderwidth=2,
-                padx=5,
-                pady=5,
-                relief=tkinter.GROOVE,
-            )
-            # side_frame.columnconfigure(0, weight=1)
-            side_frame.columnconfigure(1, weight=1)
-            side_name_entry = tkinter.Entry(
-                side_frame,
-                textvariable=self.side_data[side_index].name,
-                width=4,
-                justify=tkinter.LEFT,
-            )
-            side_name_entry.grid(row=0, column=0, padx=4, sticky=tkinter.W)
-            side_name_entry.bind("<KeyRelease>", self.set_sides_event_wrapper)
-            side_length = tkinter.Label(
-                side_frame,
-                textvariable=self.side_data[side_index].length,
-                justify=tkinter.LEFT,
-            )
-            side_length.grid(row=0, column=1, padx=4, sticky=tkinter.W)
-            side_tracks = tkinter.Label(
-                side_frame,
-                textvariable=self.side_data[side_index].tracks,
-                justify=tkinter.LEFT,
-            )
-            side_tracks.grid(
-                row=1,
-                column=0,
-                columnspan=2,
-                padx=4,
-                sticky=tkinter.W + tkinter.N,
-            )
-            side_frame.grid(
-                row=7,
-                column=2 * side_index,
-                columnspan=3,
-                sticky=tkinter.N + tkinter.W + tkinter.E + tkinter.S,
-            )
+            self.__add_medium_side_frame(side_index)
         #
         self.action_frame.grid(padx=4, pady=2, sticky=tkinter.E + tkinter.W)
         #
@@ -461,21 +430,6 @@ class UserInterface:
             )
         #
 
-    def show_about(self):
-        """Show information about the application
-        in a modal dialog
-        """
-        gui_commons.InfoDialog(
-            self.main_window,
-            (
-                SCRIPT_NAME,
-                f"Version: {VERSION}\nProject homepage: {HOMEPAGE}",
-            ),
-            ("Copyright/License:", COPYRIGHT_NOTICE),
-            title="About…",
-        )
-        #
-
     def apply_changes(self):
         """Apply changes  after showing a confirmation dialog"""
         self.set_sides()
@@ -510,11 +464,6 @@ class UserInterface:
                 icon=messagebox.INFO,
             )
         #
-
-    def quit(self, event=None):
-        """Exit the application"""
-        del event
-        self.main_window.destroy()
 
 
 #

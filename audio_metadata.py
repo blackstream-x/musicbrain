@@ -39,16 +39,18 @@ import taglib
 # Constants
 #
 
-FS_DISPLAY_TRACK_TITLE = '{0.prefix}{0.TITLE} ({0.display_duration})'
-FS_DISPLAY_TRACK_FORWARD = \
-    '{0.prefix}{0.ARTIST} – {0.TITLE} ({0.display_duration})'
-FS_MUSICBRAINZ_PARSEABLE_TRACK = \
-    '{0.prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})'
+FS_DISPLAY_TRACK_TITLE = "{0.prefix}{0.TITLE} ({0.display_duration})"
+FS_DISPLAY_TRACK_FORWARD = (
+    "{0.prefix}{0.ARTIST} – {0.TITLE} ({0.display_duration})"
+)
+FS_MUSICBRAINZ_PARSEABLE_TRACK = (
+    "{0.prefix}{0.TITLE} – {0.ARTIST} ({0.display_duration})"
+)
 
 PRX_INVALID_FILENAME = re.compile(r'["\*/:;<>\?\\\|]')
-PRX_KEYWORD = re.compile(r'\A[a-z]+\Z', re.I)
+PRX_KEYWORD = re.compile(r"\A[a-z]+\Z", re.I)
 
-SAFE_REPLACEMENT = '_'
+SAFE_REPLACEMENT = "_"
 
 
 #
@@ -60,21 +62,15 @@ class EncodingFixNotRequired(Exception):
 
     """Raised when the tags seem to be already correctly encoded"""
 
-    ...
-
 
 class NoSupportedFile(Exception):
 
     """Raised when trying to open an unsupported file using taglib"""
 
-    ...
-
 
 class TagsNotChanged(Exception):
 
     """Raised when the tags are not changed in the file"""
-
-    ...
 
 
 class TrackNumberBelowMinimum(Exception):
@@ -83,16 +79,12 @@ class TrackNumberBelowMinimum(Exception):
     for a side or medium
     """
 
-    ...
-
 
 class TrackNumberAboveMaximum(Exception):
 
     """Raised when a track number is higher than the maximum
     for a side or medium
     """
-
-    ...
 
 
 #
@@ -108,7 +100,7 @@ def fix_utf8(source_text):
         raise EncodingFixNotRequired
     #
     try:
-        fixed_text = source_text.encode('latin-1').decode('utf-8')
+        fixed_text = source_text.encode("latin-1").decode("utf-8")
     except UnicodeError as error:
         raise EncodingFixNotRequired from error
     #
@@ -147,9 +139,9 @@ class SidedTrackPosition(SortableHashableMixin):
     of an audio track on a sided medium
     """
 
-    prx_position = re.compile(r'\A([^\d]+)(?:(\d+))?\Z')
-    prx_filename_with_medium = re.compile(r'\A[cdm]\d+([^t\d\s]\S*?)\.\s')
-    prx_filename = re.compile(r'\A([^\d\s]+\d*)\.\s')
+    prx_position = re.compile(r"\A([^\d]+)(?:(\d+))?\Z")
+    prx_filename_with_medium = re.compile(r"\A[cdm]\d+([^t\d\s]\S*?)\.\s")
+    prx_filename = re.compile(r"\A([^\d\s]+\d*)\.\s")
 
     def __init__(self, position):
         """Allocate internal variables"""
@@ -163,7 +155,7 @@ class SidedTrackPosition(SortableHashableMixin):
                 self.__number = 1
             #
         else:
-            raise ValueError('Invalid position %r!' % position)
+            raise ValueError("Invalid position %r!" % position)
         #
 
     @classmethod
@@ -174,8 +166,7 @@ class SidedTrackPosition(SortableHashableMixin):
             position_match = cls.prx_filename.match(file_name)
         #
         if not position_match:
-            raise ValueError(
-                'No sided position recognized in %r!' % file_name)
+            raise ValueError("No sided position recognized in %r!" % file_name)
         #
         return cls(position_match.group(1))
 
@@ -198,14 +189,19 @@ class Track(SortableHashableMixin):
 
     """Object exposing an audio track's metadata"""
 
-    fs_unsided_prefix = 'd{0.medium_number}t{0.track_number:02d}. '
-    fs_track_and_total = '{0.track_number:02d}/{0.total_tracks:02d}'
-    prx_track_and_total = re.compile(r'\A(\d+)(?:/(\d+))?\Z')
+    fs_unsided_prefix = "d{0.medium_number}t{0.track_number:02d}. "
+    fs_track_and_total = "{0.track_number:02d}/{0.total_tracks:02d}"
+    prx_track_and_total = re.compile(r"\A(\d+)(?:/(\d+))?\Z")
     managed_tags = {
-        'ALBUM', 'ALBUMARTIST', 'ARTIST', 'DATE',
-        'DISCNUMBER', 'TITLE', 'TRACKNUMBER'}
-    ignored_tags = {
-        'COMMENT', 'DISCID'}
+        "ALBUM",
+        "ALBUMARTIST",
+        "ARTIST",
+        "DATE",
+        "DISCNUMBER",
+        "TITLE",
+        "TRACKNUMBER",
+    }
+    ignored_tags = {"COMMENT", "DISCID"}
 
     def __init__(self, file_path, length=0, tags_changed=False, **tags_map):
         """Store the file path and the metadata"""
@@ -249,12 +245,12 @@ class Track(SortableHashableMixin):
                 else:
                     if not got_encoding_errors:
                         logging.warning(
-                            '%r: encoding fixes required',
-                            file_path.name)
+                            "%r: encoding fixes required", file_path.name
+                        )
                     #
                     logging.warning(
-                        ' * %s: %r → %r',
-                        key, current_value, new_value)
+                        " * %s: %r → %r", key, current_value, new_value
+                    )
                     current_value = new_value
                     got_encoding_errors = True
                 #
@@ -265,36 +261,39 @@ class Track(SortableHashableMixin):
             file_path,
             length=length,
             tags_changed=got_encoding_errors,
-            **tags_map)
+            **tags_map
+        )
 
     @property
     def display_duration(self):
         """Return the pretty-printed ltrack length"""
-        return '%02d:%02d' % divmod(self.length, 60)
+        return "%02d:%02d" % divmod(self.length, 60)
 
     @property
     def prefix(self):
         """Return the prefix (sided position or track number)"""
         if self.sided_position:
-            return '%s. ' % self.sided_position
+            return "%s. " % self.sided_position
         #
         if self.track_number:
-            return '%02d. ' % self.track_number
+            return "%02d. " % self.track_number
         #
-        return ''
+        return ""
 
     def get_saved_changes(self, remark=None):
         """Save changes to the file and return a list of changes"""
         applied_changes = []
-        logging.warning(
-            'Saved Metadata changes in %r:',
-            self.file_path.name)
+        logging.warning("Saved Metadata changes in %r:", self.file_path.name)
         for (key, (old_value, new_value)) in self.save_tags().items():
             if remark:
-                current_change = '%s: %r → %r (%s)' % (
-                    key, old_value, new_value, remark)
+                current_change = "%s: %r → %r (%s)" % (
+                    key,
+                    old_value,
+                    new_value,
+                    remark,
+                )
             else:
-                current_change = '%s: %r → %r' % (key, old_value, new_value)
+                current_change = "%s: %r → %r" % (key, old_value, new_value)
             #
             logging.debug(current_change)
             applied_changes.append(current_change)
@@ -305,7 +304,8 @@ class Track(SortableHashableMixin):
         """Determine and set the sided position from the file name"""
         try:
             self.sided_position = SidedTrackPosition.from_file_name(
-                self.file_path.name)
+                self.file_path.name
+            )
         except ValueError:
             self.sided_position = None
         #
@@ -340,26 +340,24 @@ class Track(SortableHashableMixin):
         #
         return changes
 
-    def suggested_filename(self,
-                           include_artist_name=True,
-                           include_medium_number=True):
+    def suggested_filename(
+        self, include_artist_name=True, include_medium_number=True
+    ):
         """Return a file name suggested from the tags,
         defused using the PRX_INVALID_FILENAME regular expression
         """
-        fmt = '{0.ARTIST} - {0.TITLE}'
+        fmt = "{0.ARTIST} - {0.TITLE}"
         if self.ARTIST == self.ALBUMARTIST and not include_artist_name:
-            fmt = '{0.TITLE}'
+            fmt = "{0.TITLE}"
         #
         stem = PRX_INVALID_FILENAME.sub(SAFE_REPLACEMENT, fmt.format(self))
-        prefix = ''
+        prefix = ""
         if self.prefix:
             if include_medium_number:
                 if self.sided_position:
-                    prefix = 'd%s%s' % (self.medium_number,
-                                        self.prefix)
+                    prefix = "d%s%s" % (self.medium_number, self.prefix)
                 else:
-                    prefix = 'd%st%s' % (self.medium_number,
-                                         self.prefix)
+                    prefix = "d%st%s" % (self.medium_number, self.prefix)
                 #
             else:
                 prefix = self.prefix
@@ -375,11 +373,11 @@ class Track(SortableHashableMixin):
         if self.total_tracks:
             tracknumber = self.fs_track_and_total.format(self)
         else:
-            tracknumber = format(self.track_number, '02d')
+            tracknumber = format(self.track_number, "02d")
         #
         self.__tags_changed |= self.__set_tags(
-            TRACKNUMBER=tracknumber,
-            DISCNUMBER=str(self.medium_number))
+            TRACKNUMBER=tracknumber, DISCNUMBER=str(self.medium_number)
+        )
 
     def update_tags(self, **tags_map):
         """Update the provided tags given as strings
@@ -406,18 +404,21 @@ class Track(SortableHashableMixin):
             tags_changed = True
         #
         if tags_map:
-            unsupported_tags = ', '.join(
-                '%s=%r' % (key, value) for (key, value) in tags_map.items()
-                if key not in self.ignored_tags)
+            unsupported_tags = ", ".join(
+                "%s=%r" % (key, value)
+                for (key, value) in tags_map.items()
+                if key not in self.ignored_tags
+            )
             if unsupported_tags:
                 logging.warning(
-                    'Ignored unsupported tag(s): %s.',
-                    unsupported_tags)
+                    "Ignored unsupported tag(s): %s.", unsupported_tags
+                )
         #
-        self.medium_number = int(self.DISCNUMBER or '1', 10)
+        self.medium_number = int(self.DISCNUMBER or "1", 10)
         try:
             track_match = self.prx_track_and_total.match(
-                self.__tags['TRACKNUMBER'])
+                self.__tags["TRACKNUMBER"]
+            )
         except (KeyError, TypeError):
             self.track_number = None
             self.total_tracks = None
@@ -436,8 +437,9 @@ class Track(SortableHashableMixin):
             return self[name]
         except KeyError as error:
             raise AttributeError(
-                '%r object has no attribute %r' % (
-                    self.__class__.__name__, name)) from error
+                "%r object has no attribute %r"
+                % (self.__class__.__name__, name)
+            ) from error
         #
 
     def __getitem__(self, name):
@@ -450,41 +452,41 @@ class Track(SortableHashableMixin):
     def __str__(self):
         """Return a string representation"""
         if self.track_number is None:
-            prefix = ''
+            prefix = ""
         else:
             prefix = self.fs_unsided_prefix.format(self)
         #
         return (
-            '{0}{1.ARTIST} – {1.TITLE}'
-            ' (from {1.ALBUMARTIST} – {1.ALBUM} [{1.DATE}])'.format(
-                prefix, self))
+            "{0}{1.ARTIST} – {1.TITLE}"
+            " (from {1.ALBUMARTIST} – {1.ALBUM} [{1.DATE}])".format(
+                prefix, self
+            )
+        )
 
 
 class MediumSide:
 
     """Store one side of a sided medium"""
 
-    def __init__(self,
-                 name,
-                 maximum_track_number=1,
-                 offset=0):
+    def __init__(self, name, maximum_track_number=1, offset=0):
         """Store one side of a medium"""
         self.name = name
         self.maximum_track_number = maximum_track_number
         self.number_of_tracks = maximum_track_number - offset
         self.track_number_offset = offset
         logging.debug(
-            'MediumSide %s with %s tracks (offset: %s)',
+            "MediumSide %s with %s tracks (offset: %s)",
             self.name,
             self.number_of_tracks,
-            self.track_number_offset)
+            self.track_number_offset,
+        )
 
     @property
     def allowed_track_numbers(self):
         """Return a list of allowed track numbers"""
         return list(
-            range(self.track_number_offset + 1,
-                  self.maximum_track_number + 1))
+            range(self.track_number_offset + 1, self.maximum_track_number + 1)
+        )
 
     def get_sided_position(self, track_number):
         """Return a sided number"""
@@ -498,44 +500,47 @@ class MediumSide:
             return SidedTrackPosition(self.name)
         #
         if self.number_of_tracks < 10:
-            return SidedTrackPosition(
-                '%s%d' % (self.name, sided_track_number))
+            return SidedTrackPosition("%s%d" % (self.name, sided_track_number))
         #
-        return SidedTrackPosition('%s%02d' % (self.name, sided_track_number))
+        return SidedTrackPosition("%s%02d" % (self.name, sided_track_number))
 
 
 class BothSides:
 
     """Store both sides of a sided medium"""
 
-    def __init__(self,
-                 first_side_name,
-                 second_side_name,
-                 total_tracks=1,
-                 first_side_tracks=0):
+    def __init__(
+        self,
+        first_side_name,
+        second_side_name,
+        total_tracks=1,
+        first_side_tracks=0,
+    ):
         """Store the sides of a medium in a tuple"""
         if first_side_tracks < 0:
-            raise ValueError('first_side_tracks must be greater than 0!')
+            raise ValueError("first_side_tracks must be greater than 0!")
         #
         if total_tracks < first_side_tracks:
-            raise ValueError('total_tracks must be >= first_side_tracks!')
+            raise ValueError("total_tracks must be >= first_side_tracks!")
         #
         self.total_tracks = total_tracks
         self.__sides = (
             MediumSide(
                 first_side_name,
                 maximum_track_number=first_side_tracks,
-                offset=0),
+                offset=0,
+            ),
             MediumSide(
                 second_side_name,
                 maximum_track_number=total_tracks,
-                offset=first_side_tracks))
+                offset=first_side_tracks,
+            ),
+        )
 
     @property
     def all_track_numbers(self):
         """Return the list of all allowed track numbers"""
-        return self[0].allowed_track_numbers \
-            + self[1].allowed_track_numbers
+        return self[0].allowed_track_numbers + self[1].allowed_track_numbers
 
     def __getitem__(self, item):
         """Return the matching side"""
@@ -546,16 +551,18 @@ class Medium(SortableHashableMixin):
 
     """Store medium metadata"""
 
-    kw_missing_total = 'total missing'
-    kw_surplus_total = 'total_surplus'
-    kw_ignored_tracks = 'ignored tracks'
-    kw_missing_track_numbers = 'missing track numbers'
+    kw_missing_total = "total missing"
+    kw_surplus_total = "total_surplus"
+    kw_ignored_tracks = "ignored tracks"
+    kw_missing_track_numbers = "missing track numbers"
 
-    def __init__(self,
-                 album=None,
-                 albumartist=None,
-                 medium_number=1,
-                 declared_total_tracks=None):
+    def __init__(
+        self,
+        album=None,
+        albumartist=None,
+        medium_number=1,
+        declared_total_tracks=None,
+    ):
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
@@ -576,7 +583,8 @@ class Medium(SortableHashableMixin):
             album=track.ALBUM,
             albumartist=track.ALBUMARTIST,
             medium_number=track.medium_number,
-            declared_total_tracks=track.total_tracks)
+            declared_total_tracks=track.total_tracks,
+        )
         new_medium.add_track(track)
         return new_medium
 
@@ -609,9 +617,10 @@ class Medium(SortableHashableMixin):
     @property
     def error_string(self):
         """Return the errors as a string"""
-        return '\n'.join(
-            '%s: %r' % (category, data)
-            for (category, data) in self.errors.items())
+        return "\n".join(
+            "%s: %r" % (category, data)
+            for (category, data) in self.errors.items()
+        )
 
     @property
     def looks_sided(self):
@@ -640,7 +649,7 @@ class Medium(SortableHashableMixin):
         """Return a successor side name by incrementing
         the (last) code point
         """
-        return '%s%s' % (side_name[:-1], chr(ord(side_name[-1]) + 1))
+        return "%s%s" % (side_name[:-1], chr(ord(side_name[-1]) + 1))
 
     def __tracks_by_list(self, track_numbers_list):
         """yield all existing tracks from the track numbers list"""
@@ -658,7 +667,8 @@ class Medium(SortableHashableMixin):
         """
         side_duration = 0
         for track in self.__tracks_by_list(
-                self.sides[side].allowed_track_numbers):
+            self.sides[side].allowed_track_numbers
+        ):
             side_duration += track.length
         #
         return side_duration
@@ -666,28 +676,31 @@ class Medium(SortableHashableMixin):
     def add_track(self, track):
         """Add the track to the tracklist"""
         if track in self.all_tracks:
-            raise ValueError('Track %r already in tracklist!' % track)
+            raise ValueError("Track %r already in tracklist!" % track)
         #
         if track.ALBUM != self.album:
             raise ValueError(
-                'Track %r declares a different album than %r!' % (
-                    track, self.album))
+                "Track %r declares a different album than %r!"
+                % (track, self.album)
+            )
         #
         if track.ALBUMARTIST != self.albumartist:
             raise ValueError(
-                'Track %r declares a different albumartist than %r!' % (
-                    track, self.albumartist))
+                "Track %r declares a different albumartist than %r!"
+                % (track, self.albumartist)
+            )
         #
         if track.medium_number != self.medium_number:
             raise ValueError(
-                'Track %r declares a different medium_number than %r!' % (
-                    track, self.medium_number))
+                "Track %r declares a different medium_number than %r!"
+                % (track, self.medium_number)
+            )
         #
         if track.total_tracks != self.declared_total_tracks:
             raise ValueError(
-                'Track %r declares a different number of'
-                ' total tracks than %r!' % (
-                    track, self.declared_total_tracks))
+                "Track %r declares a different number of"
+                " total tracks than %r!" % (track, self.declared_total_tracks)
+            )
         #
         self.all_tracks.add(track)
         if track.track_number in self.tracks_map:
@@ -702,8 +715,11 @@ class Medium(SortableHashableMixin):
         for side in (0, 1):
             current_side = self.sides[side]
             for track_number in current_side.allowed_track_numbers:
-                self.tracks_map[track_number].sided_position = \
-                    current_side.get_sided_position(track_number)
+                self.tracks_map[
+                    track_number
+                ].sided_position = current_side.get_sided_position(
+                    track_number
+                )
             #
         #
 
@@ -713,7 +729,8 @@ class Medium(SortableHashableMixin):
             album=self.album,
             albumartist=self.albumartist,
             medium_number=self.medium_number,
-            declared_total_tracks=self.declared_total_tracks)
+            declared_total_tracks=self.declared_total_tracks,
+        )
         for track in self.tracks_list:
             new_medium.add_track(track)
         #
@@ -737,8 +754,9 @@ class Medium(SortableHashableMixin):
         if self.__duplicate_tracks:
             self.errors[self.kw_ignored_tracks] = self.__duplicate_tracks
         #
-        missing_tracks_count = \
+        missing_tracks_count = (
             self.effective_total_tracks - self.counted_tracks
+        )
         if missing_tracks_count > 0:
             self.errors[self.kw_missing_total] = missing_tracks_count
         elif missing_tracks_count < 0:
@@ -746,21 +764,22 @@ class Medium(SortableHashableMixin):
         #
         ignored_track_numbers = set()
         expected_track_numbers = set(
-            track_number + 1 for track_number
-            in range(self.effective_total_tracks))
+            track_number + 1
+            for track_number in range(self.effective_total_tracks)
+        )
         for (track_number, track) in self.tracks_map.items():
             if track_number not in expected_track_numbers:
                 # ignore tracks with unexpected numbers
                 ignored_track_numbers.add(track_number)
                 self.errors.setdefault(self.kw_ignored_tracks, set()).add(
-                    track)
+                    track
+                )
             #
         #
         for track_number in ignored_track_numbers:
             del self.tracks_map[track_number]
         #
-        missing_track_numbers = \
-            expected_track_numbers - set(self.tracks_map)
+        missing_track_numbers = expected_track_numbers - set(self.tracks_map)
         if missing_track_numbers:
             self.errors[self.kw_missing_track_numbers] = missing_track_numbers
         #
@@ -781,26 +800,29 @@ class Medium(SortableHashableMixin):
                     detected_sides.append(current_side)
                 #
                 if len(detected_sides) == 2 and not first_side_tracks:
-                    first_side_tracks = \
+                    first_side_tracks = (
                         track_number - track.sided_position.number
+                    )
                 #
             #
         #
         if not detected_sides:
-            raise ValueError('No sides detected!')
+            raise ValueError("No sides detected!")
         #
-        first_side_name, second_side_name = \
-            self.get_side_names(*detected_sides)
+        first_side_name, second_side_name = self.get_side_names(
+            *detected_sides
+        )
         if first_side_tracks is None:
             # One-sided medium: all tracks on the first side
             first_side_tracks = self.effective_total_tracks
         #
-        logging.debug('Got declared sides:')
+        logging.debug("Got declared sides:")
         return BothSides(
             first_side_name,
             second_side_name,
             total_tracks=self.effective_total_tracks,
-            first_side_tracks=first_side_tracks)
+            first_side_tracks=first_side_tracks,
+        )
 
     def get_side_names(self, *preset_side_names):
         """Return side names as a tuple.
@@ -809,7 +831,7 @@ class Medium(SortableHashableMixin):
         if no side names were given
         """
         if len(preset_side_names) > 2:
-            raise ValueError('2 sides allowed only!')
+            raise ValueError("2 sides allowed only!")
         #
         try:
             first_side_name = preset_side_names[0]
@@ -843,15 +865,16 @@ class Medium(SortableHashableMixin):
             first_side_tracks = last_track_number
             break
         else:
-            raise ValueError('Could not determine first side tracks')
+            raise ValueError("Could not determine first side tracks")
         #
         first_side_name, second_side_name = self.get_side_names(*side_names)
-        logging.debug('Guessed sides:')
+        logging.debug("Guessed sides:")
         return BothSides(
             first_side_name,
             second_side_name,
             total_tracks=self.effective_total_tracks,
-            first_side_tracks=first_side_tracks)
+            first_side_tracks=first_side_tracks,
+        )
 
     def reset_sided_positions(self):
         """Reset sided numbers on all tracks"""
@@ -872,14 +895,16 @@ class Medium(SortableHashableMixin):
             #
         else:
             self.determine_errors()
-            first_side_name, second_side_name = \
-                self.get_side_names(*side_names)
-            logging.debug('Applying manually set sides:')
+            first_side_name, second_side_name = self.get_side_names(
+                *side_names
+            )
+            logging.debug("Applying manually set sides:")
             both_sides = BothSides(
                 first_side_name,
                 second_side_name,
                 total_tracks=self.effective_total_tracks,
-                first_side_tracks=first_side_tracks)
+                first_side_tracks=first_side_tracks,
+            )
         #
         if self.errors:
             raise ValueError(self.error_string)
@@ -890,28 +915,30 @@ class Medium(SortableHashableMixin):
 
     def tracks_as_text(self, fmt=FS_MUSICBRAINZ_PARSEABLE_TRACK):
         """Return the tracks as a single string"""
-        return '\n'.join(fmt.format(track) for track in self.tracks_list)
+        return "\n".join(fmt.format(track) for track in self.tracks_list)
 
     def tracks_on_side(self, side, fmt=FS_DISPLAY_TRACK_TITLE):
         """Return the tracks as a single string"""
-        return '\n'.join(
-            fmt.format(track) for track in self.__tracks_by_list(
-                self.sides[side].allowed_track_numbers))
+        return "\n".join(
+            fmt.format(track)
+            for track in self.__tracks_by_list(
+                self.sides[side].allowed_track_numbers
+            )
+        )
 
     def __str__(self):
         """Return a string representation"""
         return (
-            'Medium #{0.medium_number}:'
-            ' {0.albumartist} – {0.album}'.format(self))
+            "Medium #{0.medium_number}:"
+            " {0.albumartist} – {0.album}".format(self)
+        )
 
 
 class Release(SortableHashableMixin):
 
     """Store release metadata"""
 
-    def __init__(self,
-                 album=None,
-                 albumartist=None):
+    def __init__(self, album=None, albumartist=None):
         """Store metadata"""
         self.album = album
         self.albumartist = albumartist
@@ -922,9 +949,7 @@ class Release(SortableHashableMixin):
         """Constructor method:
         Return a new release from the medium
         """
-        new_release = cls(
-            album=medium.album,
-            albumartist=medium.albumartist)
+        new_release = cls(album=medium.album, albumartist=medium.albumartist)
         new_release.add_medium(medium)
         return new_release
 
@@ -984,30 +1009,28 @@ class Release(SortableHashableMixin):
         except KeyError:
             if medium.album != self.album:
                 logging.warning(
-                    'Medium #%s has a differing title: %r!',
+                    "Medium #%s has a differing title: %r!",
                     medium_number,
-                    medium.album)
+                    medium.album,
+                )
             #
-            logging.debug(
-                'Attaching %r to the release',
-                medium)
+            logging.debug("Attaching %r to the release", medium)
             self.__media_map[medium_number] = medium
             return
         #
         # Merge tracks into the existing medium
         if medium != existing_medium:
             raise ValueError(
-                'Medium #%s already attached – '
-                ' cannot merge %r into existing %r!' % (
-                    medium.medium_number,
-                    medium,
-                    existing_medium))
+                "Medium #%s already attached – "
+                " cannot merge %r into existing %r!"
+                % (medium.medium_number, medium, existing_medium)
+            )
         #
         logging.debug(
-            'Merging %r tracklist into the tracklist'
-            ' of medium #%s',
+            "Merging %r tracklist into the tracklist of medium #%s",
             medium,
-            medium_number)
+            medium_number,
+        )
         for track in medium.tracks_list:
             existing_medium.add_track(track)
         #
@@ -1026,7 +1049,7 @@ class Release(SortableHashableMixin):
 
     def __str__(self):
         """Return a string representation"""
-        return '{0.albumartist} – {0.album}'.format(self)
+        return "{0.albumartist} – {0.album}".format(self)
 
 
 #
@@ -1041,9 +1064,9 @@ def get_release_from_path(base_directory_path):
     absolute_base_directory = base_directory_path.absolute()
     found_release = None
     if not absolute_base_directory.is_dir():
-        raise ValueError('%s is not a directory' % absolute_base_directory)
+        raise ValueError("%s is not a directory" % absolute_base_directory)
     #
-    for file_path in absolute_base_directory.glob('*'):
+    for file_path in absolute_base_directory.glob("*"):
         full_file_path = absolute_base_directory / file_path
         if full_file_path.is_dir():
             continue
@@ -1052,11 +1075,11 @@ def get_release_from_path(base_directory_path):
             current_audio_track = Track.from_path(full_file_path)
         except NoSupportedFile:
             logging.debug(
-                'File %r not supported by taglib',
-                str(full_file_path))
+                "File %r not supported by taglib", str(full_file_path)
+            )
             continue
         #
-        logging.debug('Got track %r', current_audio_track)
+        logging.debug("Got track %r", current_audio_track)
         try:
             # pylint: disable=unsubscriptable-object ; false positive
             found_medium = found_release[current_audio_track.medium_number]
@@ -1067,14 +1090,14 @@ def get_release_from_path(base_directory_path):
         except TypeError:
             # No release found yet
             found_medium = Medium.from_track(current_audio_track)
-            logging.debug('Determined medium %r', found_medium)
+            logging.debug("Determined medium %r", found_medium)
             found_release = Release.from_medium(found_medium)
         else:
             found_medium.add_track(current_audio_track)
         #
     #
     if found_release is None:
-        raise ValueError('No release found in %s' % absolute_base_directory)
+        raise ValueError("No release found in %s" % absolute_base_directory)
     #
     return found_release
 

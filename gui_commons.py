@@ -27,6 +27,8 @@ If not, see <http://www.gnu.org/licenses/>.
 """
 
 
+import pathlib
+import sys
 import tkinter
 
 # from tkinter import filedialog
@@ -36,6 +38,27 @@ from tkinter import messagebox
 #
 # Constants
 #
+
+
+COPYRIGHT_NOTICE = """Copyright (C) 2021 Rainer Schwarzbach
+
+This file is part of musicbrain.
+
+musicbrain is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+musicbrain is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with musicbrain (see LICENSE).
+If not, see <http://www.gnu.org/licenses/>."""
+
+HOMEPAGE = "https://github.com/blackstream-x/musicbrain"
 
 
 #
@@ -49,11 +72,7 @@ class ModalDialog(tkinter.Toplevel):
     <https://effbot.org/tkinterbook/tkinter-dialog-windows.htm>
     """
 
-    def __init__(self,
-                 parent,
-                 content,
-                 title=None,
-                 cancel_button=True):
+    def __init__(self, parent, content, title=None, cancel_button=True):
         """Create the toplevel window and wait until the dialog is closed"""
         super().__init__(parent)
         self.transient(parent)
@@ -77,13 +96,13 @@ class ModalDialog(tkinter.Toplevel):
             heading_area = tkinter.Label(
                 self.body,
                 text=heading,
-                font=(None, 11, 'bold'),
-                justify=tkinter.LEFT)
+                font=(None, 11, "bold"),
+                justify=tkinter.LEFT,
+            )
             heading_area.grid(sticky=tkinter.W, padx=5, pady=10)
             text_area = tkinter.Label(
-                self.body,
-                text=paragraph,
-                justify=tkinter.LEFT)
+                self.body, text=paragraph, justify=tkinter.LEFT
+            )
             text_area.grid(sticky=tkinter.W, padx=5, pady=5)
         #
 
@@ -95,14 +114,13 @@ class ModalDialog(tkinter.Toplevel):
             text="OK",
             width=10,
             command=self.action_ok,
-            default=tkinter.ACTIVE)
+            default=tkinter.ACTIVE,
+        )
         button.grid(padx=5, pady=5, row=0, column=0, sticky=tkinter.W)
         if cancel_button:
             button = tkinter.Button(
-                box,
-                text="Cancel",
-                width=10,
-                command=self.action_cancel)
+                box, text="Cancel", width=10, command=self.action_cancel
+            )
             button.grid(padx=5, pady=5, row=0, column=1, sticky=tkinter.E)
         #
         self.bind("<Return>", self.action_ok)
@@ -132,10 +150,7 @@ class InfoDialog(ModalDialog):
     after the parent window
     """
 
-    def __init__(self,
-                 parent,
-                 *content,
-                 title=None):
+    def __init__(self, parent, *content, title=None):
         """..."""
         super().__init__(parent, content, title=title, cancel_button=False)
 
@@ -147,22 +162,21 @@ class ConfirmRenameDialog(ModalDialog):
     after the parent window
     """
 
-    def __init__(self,
-                 parent,
-                 renaming_plan):
+    def __init__(self, parent, renaming_plan):
         """..."""
         self.renaming_plan = renaming_plan
         content = [
             (
-                'The following files will be renamed:',
-                '\n'.join(
-                    '%r\n → %r' % (item.source_path.name,
-                                   item.target_path.name)
-                    for item in renaming_plan))]
-        super().__init__(parent,
-                         content,
-                         title='Confirm rename',
-                         cancel_button=True)
+                "The following files will be renamed:",
+                "\n".join(
+                    f"{item.source_path.name!r}\n → {item.target_path.name!r}"
+                    for item in renaming_plan
+                ),
+            )
+        ]
+        super().__init__(
+            parent, content, title="Confirm rename", cancel_button=True
+        )
 
     def action_ok(self, event=None):
         """Execute the renamings according to the plan"""
@@ -176,23 +190,64 @@ class ConfirmRenameDialog(ModalDialog):
         if conflict_messages or error_messages:
             InfoDialog(
                 self,
+                (f"{number_of_renamings} files renamed succesfully.", ""),
                 (
-                    '%s files renamed succesfully.' % number_of_renamings,
-                    ''),
+                    f"{len(conflict_messages)} conflicts occured:",
+                    "\n".join(error_messages),
+                ),
                 (
-                    '%s conflicts occured:' % len(conflict_messages),
-                    '\n'.join(error_messages)),
-                (
-                    '%s errors occured:' % len(conflict_messages),
-                    '\n'.join(error_messages)),
-                title='Errors during rename')
+                    f"{len(error_messages)} errors occured:",
+                    "\n".join(error_messages),
+                ),
+                title="Errors during rename",
+            )
         else:
-            messagebox.showinfo(
-                'Success',
-                str(result),
-                icon=messagebox.INFO)
+            messagebox.showinfo("Success", str(result), icon=messagebox.INFO)
         #
         self.action_cancel()
+
+
+class UserInterface:
+
+    """GUI using tkinter"""
+
+    script_name = "(human-readable script name)"
+    window_title = "musicbrain: script specific title"
+
+    def __init__(self):
+        """Read the version file and create the main window"""
+        script_path = pathlib.Path(sys.argv[0])
+        if script_path.is_symlink():
+            script_path = script_path.readlink()
+        #
+        version_path = script_path.parent / "version.txt"
+        try:
+            self.version = version_path.read_text().strip()
+        except OSError as os_error:
+            self.version = f"(Version file is missing: {os_error})"
+        #
+        self.main_window = tkinter.Tk()
+        self.main_window.title(self.window_title)
+
+    def show_about(self):
+        """Show information about the application
+        in a modal dialog
+        """
+        InfoDialog(
+            self.main_window,
+            (
+                self.script_name,
+                f"Version: {self.version}\nProject homepage: {HOMEPAGE}",
+            ),
+            ("Copyright/License:", COPYRIGHT_NOTICE),
+            title="About…",
+        )
+        #
+
+    def quit(self, event=None):
+        """Exit the application"""
+        del event
+        self.main_window.destroy()
 
 
 # vim: fileencoding=utf-8 ts=4 sts=4 sw=4 autoindent expandtab syntax=python:
