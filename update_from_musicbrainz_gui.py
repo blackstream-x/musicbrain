@@ -231,6 +231,8 @@ class UserInterface():
     def __init__(self, directory_path):
         """Build the GUI"""
         self.main_window = tkinter.Tk()
+        # FIXME: hard-coded HiDPI scaling // does not change ttk widgets?
+        self.main_window.tk.call('tk', 'scaling', 2.0)
         self.main_window.title(MAIN_WINDOW_TITLE)
         mbdata.set_useragent(SCRIPT_NAME, VERSION, contact=HOMEPAGE)
         self.variables = Namespace(
