@@ -1,0 +1,10 @@
+{
+  "name": "Update from MusicBrainz",
+  "comment": "update album metadata from MusicBrainz",
+  "nemo_icon_name": "",
+  "caja_icon_name": "",
+  "relative_path": "update_from_musicbrainz_gui.py",
+  "extensions": "",
+  "mimetypes": "",
+  "identifier": ""
+}
