@@ -556,7 +556,7 @@ class LocalTrackChanges:
         #
         metadata_changes = {}
         extra_attribute_changes = {}
-        for (old_value, new_value), key in self.__changes.items():
+        for key, (old_value, new_value) in self.__changes.items():
             if key in self.extra_attributes:
                 target = extra_attribute_changes
             elif key in self.track.managed_tags:
